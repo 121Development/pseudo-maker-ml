@@ -41,3 +41,33 @@ def sample_docx(tmp_path: Path) -> Path:
     out = tmp_path / "sample.docx"
     doc.save(str(out))
     return out
+
+
+def _available_backends() -> list[str]:
+    from pseudo_maker import models
+    from pseudo_maker.detect.pipeline import _spacy_model_installed
+
+    out = []
+    if models.runtime_available() and models.available(models.KB_NER):
+        out.append("kb")
+    if _spacy_model_installed("sv_core_news_lg"):
+        out.append("spacy")
+    out.append("off")
+    return out
+
+
+@pytest.fixture(params=_available_backends())
+def ner_backend(request, monkeypatch):
+    """Run a test once per installed NER backend (via $PSEUDO_MAKER_NER).
+
+    "off" = rules only: the hard-coded fallback must still round-trip.
+    """
+    monkeypatch.setenv("PSEUDO_MAKER_NER", request.param)
+    return request.param
+
+
+@pytest.fixture
+def needs_ner(ner_backend):
+    """Skip in rules-only mode: plain person names need a model to be found."""
+    if ner_backend == "off":
+        pytest.skip("needs an NER model")

@@ -1,6 +1,8 @@
 """End-to-end clean → restore round-trip tests."""
 from __future__ import annotations
 
+import pytest
+
 import json
 from pathlib import Path
 
@@ -60,6 +62,7 @@ def test_docx_format_preserved(sample_docx, tmp_path):
     assert len(new_bold_runs) >= 1
 
 
+@pytest.mark.usefixtures("needs_ner")
 def test_text_clean_then_restore(tmp_path):
     src = tmp_path / "input.txt"
     src.write_text(
@@ -80,6 +83,7 @@ def test_text_clean_then_restore(tmp_path):
     assert restored.read_text(encoding="utf-8") == src.read_text(encoding="utf-8")
 
 
+@pytest.mark.usefixtures("needs_ner")
 def test_fuzzy_restore_recovers_lightly_modified_fakes(tmp_path):
     src = tmp_path / "input.txt"
     src.write_text("Anna Andersson har telefonnummer 070-123 45 67.", encoding="utf-8")
@@ -107,3 +111,5 @@ def test_fuzzy_restore_recovers_lightly_modified_fakes(tmp_path):
 
 def _normalize(s: str) -> str:
     return " ".join(s.split())
+
+pytestmark = pytest.mark.usefixtures("ner_backend")

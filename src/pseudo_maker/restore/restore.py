@@ -141,6 +141,10 @@ def restore(
         # Single-word tokens are quick; we use process.extractOne against fake names.
         # For simplicity we look at word-level windows of size 1..4.
         words = re.findall(r"\S+", out)
+        # Never fuzzy-match a word that is itself a real value: it may have
+        # just been restored by the exact pass (or by another paragraph).
+        real = {e["original"].lower() for e in entries}
+        real |= {p for e in entries for p in re.split(r"[\s\-]+", e["original"].lower()) if p}
         for entry in unmatched:
             fake = entry["fake"]
             best = None  # (score, start_word_idx, n_words)
@@ -148,6 +152,8 @@ def restore(
             for n in {1, n_fake_words}:
                 for i in range(len(words) - n + 1):
                     candidate = " ".join(words[i : i + n])
+                    if candidate.lower() in real:
+                        continue
                     score = fuzz.ratio(fake, candidate)
                     if score >= fuzzy_threshold and (best is None or score > best[0]):
                         best = (score, i, n, candidate)

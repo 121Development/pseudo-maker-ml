@@ -53,6 +53,9 @@ class Mapper:
         self.rng = random.Random(seed)
         self._by_key: dict[tuple[str, str], MappingEntry] = {}
         self._used_fakes: set[str] = set()
+        # Real values (and name parts) in the document; fakes must never equal
+        # one, or restore can't tell a fake from a real value.
+        self._reserved: set[str] = set()
         self._next_id = 1
 
     def _new_id(self) -> str:
@@ -60,10 +63,39 @@ class Mapper:
         self._next_id += 1
         return eid
 
+    _NOT_RESERVED = {
+        "ab", "hb", "kb", "(publ)", "aktiebolag", "ltd", "inc", "llc", "plc", "gmbh", "ag",
+        "och", "and", "&", "i", "på", "of",
+    }
+
+    def reserve(self, originals) -> None:
+        """Register every real value of the document before mapping starts.
+
+        Name-like parts (≥ 3 letters, not legal suffixes or particles) are
+        reserved too, so a fake never reuses a real first name or surname.
+        """
+        for o in originals:
+            self._reserved.add(o.lower())
+            for p in re.split(r"[\s\-]+", o.lower()):
+                if len(p) >= 3 and p.isalpha() and p not in self._NOT_RESERVED and p not in sv.NAME_PARTICLES:
+                    self._reserved.add(p)
+
+    def _collides(self, candidate: str, original: str) -> bool:
+        if candidate == original or candidate in self._used_fakes:
+            return True
+        c = candidate.lower()
+        if c in self._reserved:
+            return True
+        return any(p in self._reserved for p in re.split(r"[\s\-]+", c) if p)
+
     def _unique_fake(self, entity_type: str, original: str, **hints) -> str:
         for _ in range(50):
             candidate = generate_fake(entity_type, original, self.rng, **hints)
-            if candidate not in self._used_fakes and candidate != original:
+            if entity_type in GENITIVE_TYPES:
+                bad = self._collides(candidate, original)   # word-like: check name parts too
+            else:
+                bad = candidate in self._used_fakes or candidate == original
+            if not bad:
                 self._used_fakes.add(candidate)
                 return candidate
         # Last-resort suffix to guarantee uniqueness
@@ -186,7 +218,9 @@ class Mapper:
         for _ in range(50):
             head = generate_fake("PERSON", " ".join(original.split()[:-1]) + " X", self.rng).split()[:-1]
             candidate = sv.match_case(original, " ".join(head + [fake_last]))
-            if candidate not in self._used_fakes:
+            if candidate not in self._used_fakes and not any(
+                p in self._reserved for p in re.split(r"[\s\-]+", " ".join(head).lower()) if p
+            ):
                 break
         self._used_fakes.add(candidate)
         entry = MappingEntry(id=self._new_id(), type="PERSON", original=original, fake=candidate, occurrences=1)

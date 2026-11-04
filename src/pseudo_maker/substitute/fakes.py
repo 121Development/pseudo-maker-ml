@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import random
+import string
 import re
 from datetime import datetime, timedelta
 
@@ -17,7 +18,8 @@ _fake_en = Faker("en_US")
 
 _COMPANY_SUFFIX = re.compile(
     r"\s+(AB(?:\s*\(publ\))?|HB|KB|Aktiebolag(?:\s*\(publ\))?|Handelsbolag|"
-    r"Kommanditbolag|ek\.\s?för\.?|ekonomisk förening|i likvidation)$",
+    r"Kommanditbolag|ek\.\s?för\.?|ekonomisk förening|i likvidation|"
+    r"Ltd\.?|Limited|Inc\.?|LLC|LLP|plc|PLC|GmbH|AG|Oy|Oyj|ASA|A/S|B\.V\.|N\.V\.|S\.A\.|Corp\.?|Corporation)$",
     re.IGNORECASE,
 )
 
@@ -138,6 +140,9 @@ def fake_address(original: str, rng: random.Random) -> str:
     if "\n" in original:
         return _fake_se.address().replace("\n", ", ")
     street = _fake_se.street_name()
+    lead = re.match(r"^(\d{1,4}[A-Za-z]?)\s+", original)
+    if lead:  # English style: "15 Oak Avenue" → "37 Björkvägen"
+        return f"{rng.randint(1, 99 if len(lead.group(1)) <= 2 else 199)} {sv.match_case(original[lead.end():], street)}"
     m = _HOUSE_NUMBER.search(original)
     if not m:
         return sv.match_case(original, street)
@@ -364,6 +369,17 @@ def fake_case_number(original: str, rng: random.Random) -> str:
     return re.sub(r"\d+", repl, original)
 
 
+def fake_id_number(original: str, rng: random.Random) -> str:
+    """Generic ID (tax id, account, licence …): same letters/digits/separators."""
+    return "".join(
+        rng.choice(string.ascii_uppercase) if c.isalpha() and c.isupper()
+        else rng.choice(string.ascii_lowercase) if c.isalpha()
+        else str(rng.randint(0, 9)) if c.isdigit()
+        else c
+        for c in original
+    )
+
+
 # Dispatch table — one entry per entity type
 GENERATORS = {
     "PERSON": fake_person,
@@ -386,6 +402,7 @@ GENERATORS = {
     "LICENSE_PLATE": fake_license_plate,
     "PASSPORT": fake_passport,
     "CASE_NUMBER": fake_case_number,
+    "ID_NUMBER": fake_id_number,
     "DATE": fake_date,
     "AGE": fake_age,
 }

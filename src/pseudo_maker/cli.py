@@ -8,7 +8,6 @@ from rich.console import Console
 from rich.table import Table
 
 from . import orchestrate
-from .detect.pipeline import DetectionPipeline
 from .io import docx_io, text_io
 
 app = typer.Typer(
@@ -64,7 +63,9 @@ def clean(
     out: Path = typer.Option(None, "--out", "-o", help="Cleaned output path (default: <input>.cleaned.<ext>)."),
     mapping: Path = typer.Option(None, "--mapping", "-m", help="Mapping file path (default: <input>.mapping.json)."),
     system_prompt: Path = typer.Option(None, "--system-prompt", help="Where to write the suggested LLM system prompt."),
-    no_ner: bool = typer.Option(False, "--no-ner", help="Skip the spaCy NER step (regex/checksum only)."),
+    no_ner: bool = typer.Option(False, "--no-ner", help="Skip all NER models (rules only). Same as --ner off."),
+    ner: str = typer.Option(None, "--ner", help="Swedish NER: auto | kb | spacy | off (default: auto = KB-BERT if installed, else spaCy)."),
+    english_ner: str = typer.Option(None, "--english-ner", help="English NER (Rampart): auto | on | off (default: auto = English-looking paragraphs)."),
     seed: int = typer.Option(42, "--seed", help="Random seed for reproducible fakes."),
 ):
     """Produce a cleaned version of the document and a mapping.json for restore."""
@@ -73,9 +74,9 @@ def clean(
     system_prompt = system_prompt or _default_prompt_path(input_path)
 
     if orchestrate.is_docx_path(input_path):
-        mapper = orchestrate.clean_docx(input_path, out, mapping, use_ner=not no_ner, seed=seed)
+        mapper = orchestrate.clean_docx(input_path, out, mapping, use_ner=not no_ner, seed=seed, ner=ner, english_ner=english_ner)
     else:
-        mapper = orchestrate.clean_text(input_path, out, mapping, use_ner=not no_ner, seed=seed)
+        mapper = orchestrate.clean_text(input_path, out, mapping, use_ner=not no_ner, seed=seed, ner=ner, english_ner=english_ner)
 
     Path(system_prompt).write_text(SYSTEM_PROMPT_TEMPLATE, encoding="utf-8")
 
@@ -136,9 +137,11 @@ def restore(
 def detect(
     input_path: Path = typer.Argument(..., exists=True, readable=True),
     no_ner: bool = typer.Option(False, "--no-ner"),
+    ner: str = typer.Option(None, "--ner", help="auto | kb | spacy | off"),
+    english_ner: str = typer.Option(None, "--english-ner", help="auto | on | off"),
 ):
     """Dry-run: list detected entities without writing a cleaned document."""
-    pipeline = DetectionPipeline(use_ner=not no_ner)
+    pipeline = orchestrate.make_pipeline(use_ner=not no_ner, ner=ner, english_ner=english_ner)
     if orchestrate.is_docx_path(input_path):
         _doc, handles = docx_io.load(input_path)
         text = "\n".join(h.full_text for h in handles)
@@ -155,6 +158,32 @@ def detect(
         table.add_row(s.type, s.value, s.source, f"{s.confidence:.2f}")
     console.print(table)
     console.print(f"[bold]Total:[/bold] {len(spans)} entities")
+
+
+@app.command("fetch-models")
+def fetch_models(
+    dest: Path = typer.Option(None, "--dest", help="Models root (default: $PSEUDO_MAKER_MODELS_DIR or ~/.cache/pseudo-maker/models)."),
+    skip_kb: bool = typer.Option(False, "--skip-kb", help="Only fetch Rampart."),
+):
+    """Download Rampart and build the KB-BERT ONNX model (KB needs the [export] extra)."""
+    import os
+
+    from . import models
+
+    env_dir = os.environ.get("PSEUDO_MAKER_MODELS_DIR")
+    root = dest or (Path(env_dir) if env_dir else models.cache_root())
+    console.print(f"Rampart → {models.fetch_rampart(root)}")
+    if skip_kb:
+        return
+    try:
+        import torch  # noqa: F401
+        import transformers  # noqa: F401
+    except ImportError:
+        console.print("[yellow]Building KB-BERT needs the export extra:[/] pip install '.[export]'")
+        raise typer.Exit(1)
+    from .export_kb import main as export_kb
+
+    raise typer.Exit(export_kb(["--out", str(root)]))
 
 
 @app.command()

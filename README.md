@@ -1,6 +1,8 @@
-# Pseudo Maker
+# Pseudo Maker ML
 
-Anonymize Swedish PII in documents so you can safely share them with public LLMs, then restore the originals on the way back.
+> ML variant of [pseudo-maker](https://github.com/121Development/pseudo-maker). It detects names, companies and places with two NER models: **KB-BERT** for Swedish and **Rampart** for English. Hard-coded rules sit underneath as the fallback for structured IDs and edge cases.
+
+Anonymize Swedish (and English) PII in documents so you can safely share them with public LLMs, then restore the originals on the way back.
 
 Upload a Word document (or plain text / Markdown). The tool detects person names, company names, Swedish personnummer and organisationsnummer, addresses, phone numbers, emails, bank details and more. Each detection gets replaced by a realistic Swedish-locale substitute — personnummer with a valid checksum, `Anna Andersson` → `Karin Berg`, `Volvo AB` → `Åkesson AB`. You get a cleaned file plus a mapping file. Paste the cleaned text into ChatGPT (or similar), save the response, then restore to get the originals back — with a per-session audit log of what was substituted.
 
@@ -34,9 +36,48 @@ The mapping file contains your real sensitive values — **keep it local**. The 
 | Other identifiers | Swedish license plates, passport numbers, IP addresses, URLs |
 | Quasi-identifiers | Dates, ages |
 
-Detection combines two techniques:
-- **Regex + checksum validators** for deterministic formats (personnummer, orgnr, IBAN, credit card, …). Skips `ISO 27001`-style standard numbers, country names, role words (`OWNER/FOUNDER`), and a built-in blocklist of common false positives (`site`, `turnover`, `Java` the language, `barbell`, …).
-- **Swedish spaCy NER** (`sv_core_news_lg`) for people, companies, and locations.
+### Detection: models first, rules as fallback
+
+```
+paragraph ─┬─▶ KB-BERT Swedish NER (ONNX, int8)   persons, companies, places   ── always
+           ├─▶ Rampart (ONNX, q4)                 English names, addresses     ── English-looking paragraphs
+           ├─▶ spaCy sv_core_news_lg (optional)   assists on English; replaces KB-BERT if it isn't installed
+           └─▶ rules (always on)                  checksum IDs, AB/Ltd company patterns, streets + house numbers,
+                                                  case numbers, known Swedish/international companies and places
+                         │
+                         ▼
+     merge overlaps (checksum IDs always win; models and name patterns: longer span wins)
+     → shared filters (blocklists, titles, agencies, job titles, countries)
+     → document-wide name propagation, genitives, aliases
+```
+
+| Model | What it's for | Size | License |
+|---|---|---|---|
+| [`KBLab/bert-base-swedish-cased-ner`](https://huggingface.co/KBLab/bert-base-swedish-cased-ner) | Swedish persons / organisations / locations (SUC 3.0, F1 0.92) | 125 MB (int8 ONNX, exported locally) | MIT (base: CC0) |
+| [`nationaldesignstudio/rampart`](https://github.com/nationaldesignstudio/rampart) | English / Latin-script PII: names, streets, cities, IDs | 15 MB (q4 ONNX) | CC BY 4.0 |
+| `sv_core_news_lg` (optional) | Fallback when KB-BERT isn't installed; extra recall on English company names | 550 MB | CC BY-SA 4.0 |
+
+Both models run on CPU with `onnxruntime`. There's no PyTorch at runtime and no network access: models are only downloaded by `pseudo-maker fetch-models`. See [`NOTICE`](NOTICE) for attribution.
+
+**Evaluation** (`python scripts/eval_ner.py`; *leak-free recall* = share of names/companies/places with every character replaced):
+
+| Setup | Held-out set: sv | en | mix | all | precision | ms / paragraph |
+|---|---|---|---|---|---|---|
+| spaCy + rules (original pseudo-maker) | 90.0% | 73.5% | 85.7% | 83.0% | 98.8% | 6 |
+| KB-BERT + rules | **100%** | 67.6% | 85.7% | 85.2% | 98.7% | 17 |
+| **KB-BERT + Rampart + rules (default)** | **100%** | **91.2%** | **92.9%** | **95.5%** | 98.8% | 72 |
+
+`tests/data/ner_heldout.jsonl` (40 passages, 88 entities) was written after the rules were tuned and never used for tuning. On the tuning set (`ner_gold.jsonl`, 87 passages) the default setup reaches 98.9%. Remaining misses are mostly English company names that none of the models know, e.g. "Pinewood Analytics".
+
+Selecting models:
+
+| Setting | CLI | Environment (web UI / Docker) | Values |
+|---|---|---|---|
+| Swedish NER | `--ner` | `PSEUDO_MAKER_NER` | `auto` (KB-BERT, else spaCy, else rules only) · `kb` · `spacy` · `off` |
+| English NER | `--english-ner` | `PSEUDO_MAKER_ENGLISH_NER` | `auto` (English-looking paragraphs) · `on` (all) · `off` |
+| Model location | `fetch-models --dest` | `PSEUDO_MAKER_MODELS_DIR` | default `~/.cache/pseudo-maker/models` |
+
+The **rules** use regex + checksum validators for deterministic formats (personnummer, orgnr, IBAN, credit card, …). They skip `ISO 27001`-style standard numbers, country names, role words (`OWNER/FOUNDER`), and a built-in blocklist of common false positives (`site`, `turnover`, `Java` the language, `Teams`, `Skatteverket`, weekdays, titles, …).
 
 ## Substitution
 
@@ -74,7 +115,9 @@ Best for deploying to an internal server that laptops hit over the browser.
 ```sh
 git clone <this-repo>
 cd pseudo-maker
-docker compose build       # ~5–10 min first time (bakes spaCy Swedish model into the image)
+docker compose build       # ~10–15 min first time: exports KB-BERT to ONNX, downloads Rampart (+ spaCy)
+# smaller image without the spaCy fallback:
+# docker compose build --build-arg WITH_SPACY=0
 docker compose up -d
 curl -f http://127.0.0.1:8765/api/health
 ```
@@ -88,9 +131,14 @@ Best for a single laptop, including offline use.
 ```sh
 # Use a pre-built binary from dist/ (if available), or build your own:
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+pip install --index-url https://download.pytorch.org/whl/cpu torch   # only for the KB-BERT export
+pip install -e ".[dev,export,spacy]"
 python -m spacy download sv_core_news_lg
+pseudo-maker fetch-models                                           # → ~/.cache/pseudo-maker/models
+pyinstaller pseudo-maker.spec    # bundles both ONNX models; or by hand:
 pyinstaller --onefile \
+  --collect-all onnxruntime --collect-all tokenizers \
+  --add-data "$HOME/.cache/pseudo-maker/models:models" \
   --collect-all spacy --collect-all sv_core_news_lg --collect-all thinc \
   --collect-all faker --collect-all docx \
   --collect-all fastapi --collect-all uvicorn --collect-all starlette --collect-all multipart \
@@ -98,7 +146,7 @@ pyinstaller --onefile \
   --paths src --name pseudo-maker entrypoint.py
 ```
 
-The result is `dist/pseudo-maker` (~263 MB, includes Python + spaCy + the Swedish model). It runs on macOS / Linux / Windows as a single file — no Python needed on the target machine. Build on the OS you want to run on (PyInstaller doesn't cross-compile cleanly).
+The result is `dist/pseudo-maker`. It includes Python, onnxruntime, both ONNX models (~140 MB), and spaCy if installed. Leave out the spaCy lines for a smaller binary. It runs on macOS / Linux / Windows as a single file — no Python needed on the target machine. Build on the OS you want to run on (PyInstaller doesn't cross-compile cleanly).
 
 ```sh
 ./dist/pseudo-maker serve        # opens the UI at http://127.0.0.1:8765
@@ -115,9 +163,12 @@ git clone <this-repo>
 cd pseudo-maker
 python -m venv .venv
 source .venv/bin/activate        # on Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
+pip install --index-url https://download.pytorch.org/whl/cpu torch
+pip install -e ".[dev,export,spacy]"
 python -m spacy download sv_core_news_lg
-pytest                           # full test suite (~40 tests, <5s)
+pseudo-maker fetch-models        # Rampart download + KB-BERT ONNX export (~2 min)
+pytest                           # ~125 tests; model tests skip if models are missing
+python scripts/eval_ner.py       # precision / recall table per setup
 pseudo-maker serve             # start the web UI
 ```
 
@@ -160,11 +211,17 @@ Run `pseudo-maker <cmd> --help` for the full option set (seed, NER toggle, fuzzy
 ```
 pseudo-maker/
 ├── src/pseudo_maker/
-│   ├── cli.py                   # Typer CLI: clean / restore / detect / serve
+│   ├── cli.py                   # Typer CLI: clean / restore / detect / serve / fetch-models
+│   ├── models.py                # Model lookup + Rampart download
+│   ├── export_kb.py             # KB-BERT → int8 ONNX export (build time)
 │   ├── orchestrate.py           # Preview + finalize + restore + audit-log helpers
 │   ├── detect/                  # Detection pipeline
-│   │   ├── pipeline.py            # Combines regex + NER, resolves overlaps
-│   │   ├── ner_swedish.py         # spaCy sv_core_news_lg wrapper with filters
+│   │   ├── pipeline.py            # Models first, rules as fallback; resolves overlaps
+│   │   ├── kb_ner.py              # KB-BERT Swedish NER (ONNX, IO-tag grouping)
+│   │   ├── rampart_ner.py         # Rampart English PII (ONNX, BIO decoding)
+│   │   ├── models/onnx_tagger.py  # Shared ONNX token classifier (windows, offsets)
+│   │   ├── ner_postprocess.py     # Filters shared by every model
+│   │   ├── ner_swedish.py         # spaCy sv_core_news_lg (optional fallback)
 │   │   ├── blocklist.py           # False-positive blocklists / country list
 │   │   └── recognizers/           # Per-type regex + checksum recognizers
 │   ├── substitute/              # Fake generation + mapping
@@ -177,7 +234,9 @@ pseudo-maker/
 │   └── server/                  # FastAPI app + static UI
 │       ├── app.py                 # HTTP endpoints + session store
 │       └── static/                # index.html + app.js + style.css
-├── tests/                       # pytest — 39 tests covering recognizers, mapper, restore, audit, filters
+├── tests/                       # pytest — recognizers, mapper, restore, models, per-backend round trips
+│   └── data/                    # hand-labelled NER gold + held-out sets
+├── scripts/eval_ner.py          # compare NER setups on the gold sets
 ├── Dockerfile, docker-compose.yml, .dockerignore
 ├── DEPLOY.md                    # How to run on an internal server
 ├── docker_plan.md               # Future subdomain + reverse-proxy proposal
@@ -199,13 +258,15 @@ Round-trip tests verify that `clean → restore` produces byte-identical output 
 - **Your files never leave the machine running the tool.** The web UI talks to a local process only. The Docker image binds to its own network namespace; IT decides what the LAN can reach.
 - Uploaded files are kept in an **in-memory tmpfs** while being processed, reaped after **5 minutes** or when the browser tab closes (whichever is first). The Docker container additionally mounts `/tmp` as tmpfs so restart wipes everything.
 - The mapping file contains your real sensitive values. The tool writes it once and hands it to you; don't share it with the LLM.
-- No telemetry. No outbound calls at runtime. The only network activity during `docker compose build` is pulling the base image and downloading the spaCy model.
+- No telemetry. No outbound calls at runtime. The only network activity is during `docker compose build` / `pseudo-maker fetch-models`: pulling the base image and downloading the models from Hugging Face.
 
 ## Limitations / known issues
 
-- The Swedish spaCy NER model occasionally splits compound names (e.g. `Uppsala Universitet` → `Uppsala` as city + `Universitet` as company). Uncheck one of the rows in the preview table if you want to avoid the split. A post-processor to merge adjacent CITY+ORG spans is a likely future improvement.
+- English company names that aren't in the built-in list and have no legal suffix (`Ltd`, `Inc`, `AB`, …) can be missed. Rampart has no company label. Check the preview table.
+- Rampart lowercases text and strips accents, and covers Latin-script languages only. Swedish text is handled by KB-BERT.
+- Detection is ~70 ms per paragraph on CPU with both models (vs ~6 ms with spaCy only). A 20-page document takes roughly 10–30 s.
 - Documents with complex .docx formatting (nested tables, text boxes, images with embedded text) may lose some formatting when a single sensitive value spans multiple runs. Plain paragraphs and simple tables are preserved reliably.
-- The tool is tuned for Swedish text. English and other Nordic languages partially work because spaCy's Swedish model and Faker's `sv_SE` locale handle some overlap, but recall drops for non-Swedish names and addresses.
+- Fakes are always Swedish-locale (Faker `sv_SE`), also for English text.
 
 ## License
 

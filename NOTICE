@@ -1,0 +1,19 @@
+pseudo-maker-ml uses the following third-party models. The model files are
+not stored in this repository; `pseudo-maker fetch-models` downloads (and,
+for KB-BERT, converts) them.
+
+Rampart
+  nationaldesignstudio/rampart — https://github.com/nationaldesignstudio/rampart
+  © National Design Studio. Licensed under CC BY 4.0
+  (https://creativecommons.org/licenses/by/4.0/). Used unmodified (q4 ONNX).
+  Trained on ai4privacy/pii-masking-openpii-1.5m (CC BY 4.0) and in-house
+  corpora of National Design Studio.
+
+KB-BERT Swedish NER
+  KBLab/bert-base-swedish-cased-ner — https://huggingface.co/KBLab/bert-base-swedish-cased-ner
+  © National Library of Sweden / KBLab. Licensed under the MIT License; base
+  model KBLab/bert-base-swedish-cased under CC0 1.0. Converted to ONNX and
+  int8-quantized by `pseudo_maker.export_kb` (weights otherwise unchanged).
+
+spaCy sv_core_news_lg (optional fallback)
+  © Explosion AI. Licensed under CC BY-SA 4.0.

@@ -129,3 +129,30 @@ def parse_month(token: str) -> int | None:
     return None
 
 
+
+
+# --- Language guess ---------------------------------------------------------
+
+_EN_STOP = frozenset(
+    "the and of to is are was were with for in on at by from this that be have has "
+    "will would please our your their his her it as an or not we you they".split()
+)
+_SV_STOP = frozenset(
+    "och att det som är på med för en ett av till den har inte om var vid "
+    "jag vi ni de han hon sin sitt sina ska kan också eller samt där när".split()
+)
+_WORD = re.compile(r"[A-Za-zÅÄÖåäöÉé']+")
+
+
+def looks_english(text: str) -> bool:
+    """Cheap stop-word vote: True if the text reads as English rather than Swedish.
+
+    Short texts with no stop words (headings, names, table cells) return
+    True so the English model also gets a look at them.
+    """
+    words = [w.lower() for w in _WORD.findall(text)]
+    en = sum(w in _EN_STOP for w in words)
+    sv = sum(w in _SV_STOP for w in words)
+    if en == 0 and sv == 0:
+        return True
+    return en >= sv

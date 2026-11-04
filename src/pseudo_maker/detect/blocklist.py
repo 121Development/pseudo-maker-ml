@@ -38,6 +38,27 @@ PERSON_BLOCKLIST: set[str] = {
     "cv", "lebenslauf", "resumé", "resume",
     # Sports / hobby terms that sometimes get flagged
     "barbell", "dumbbell", "crossfit", "yoga", "pilates",
+    # Honorifics / titles
+    "mr", "mrs", "ms", "miss", "dr", "prof", "professor", "sir", "madam", "fru", "herr",
+    "fröken", "doktor", "docent",
+    # Weekdays and months (EN + SV)
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "måndag", "tisdag", "onsdag", "torsdag", "fredag", "lördag", "söndag",
+    "january", "february", "march", "april", "may", "june", "july", "august",
+    "september", "october", "november", "december", "januari", "februari", "mars",
+    "maj", "juni", "juli", "augusti", "oktober",
+    # Pronouns (EN + SV) — capitalised at sentence start
+    "she", "he", "they", "we", "i", "you", "it", "her", "his", "hon", "han", "hen", "de", "vi", "jag",
+    # Languages / nationalities
+    "swedish", "english", "german", "french", "spanish", "finnish", "norwegian", "danish",
+    "arabic", "italian", "dutch", "polish", "russian", "chinese", "somali", "persian",
+    "svenska", "engelska", "tyska", "franska", "spanska", "finska", "arabiska",
+    "curriculum vitae", "cv", "personligt brev", "cover letter",
+    # More tools that get tagged as names
+    "jira", "tableau", "power bi", "sql", "confluence", "figma", "notion", "trello",
+    "salesforce", "hubspot", "sap", "visma", "fortnox",
+    # Conjunctions models sometimes glue between names
+    "och", "and", "samt", "eller", "or",
     # Misc
     "mainly", "primarily", "ongoing", "recent", "previous", "current",
 }
@@ -113,5 +134,35 @@ COMPANY_BLOCKLIST: set[str] = {
 }
 
 
+COMPANY_BLOCKLIST |= {
+    "socialtjänsten", "socialstyrelsen", "trafikverket", "skolverket", "boverket",
+    "naturvårdsverket", "arbetsmiljöverket", "tullverket", "försvarsmakten",
+    "socialnämnden", "kommunen", "regionen", "länsstyrelsen", "domstolsverket",
+    "pensionsmyndigheten", "e-hälsomyndigheten", "csn", "1177", "vårdcentralen",
+}
+
+# Job-title words: a span made only of these is a role, not a company or person.
+JOB_WORDS: set[str] = {
+    "data", "scientist", "engineer", "developer", "analyst", "manager", "consultant",
+    "senior", "junior", "lead", "head", "chief", "officer", "director", "designer",
+    "architect", "specialist", "coordinator", "assistant", "intern", "trainee",
+    "product", "project", "program", "software", "backend", "frontend", "fullstack",
+    "sales", "marketing", "finance", "hr", "operations", "support", "owner", "of",
+    "utvecklare", "konsult", "chef", "projektledare", "säljare", "ekonom", "ingenjör",
+}
+
+
+def is_job_title(value: str) -> bool:
+    words = [w for w in value.lower().replace(",", " ").split() if w]
+    return bool(words) and all(w in JOB_WORDS for w in words)
+
+
+# Swedish public bodies by name shape: "Trafikverket", "Kronofogdemyndigheten", "Arbetsmiljöinspektionen".
+_AGENCY_SUFFIX = ("verket", "myndigheten", "inspektionen", "styrelsen", "nämnden", "kassan", "rådet")
+
+
 def is_blocklisted_company(value: str) -> bool:
-    return normalize(value) in COMPANY_BLOCKLIST
+    v = normalize(value)
+    if v in COMPANY_BLOCKLIST or is_job_title(v):
+        return True
+    return " " not in v and v.endswith(_AGENCY_SUFFIX)

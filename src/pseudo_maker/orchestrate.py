@@ -85,6 +85,18 @@ def _collect_preview_entities(mapper: Mapper) -> list[PreviewEntity]:
     ]
 
 
+def make_pipeline(*, use_ner: bool = True, ner: str | None = None, english_ner: str | None = None) -> DetectionPipeline:
+    """Build the detection pipeline. Modes default to $PSEUDO_MAKER_NER /
+    $PSEUDO_MAKER_ENGLISH_NER, else "auto" (use whatever models are installed)."""
+    import os
+
+    return DetectionPipeline(
+        use_ner=use_ner,
+        ner=ner or os.environ.get("PSEUDO_MAKER_NER", "auto"),
+        english_ner=english_ner or os.environ.get("PSEUDO_MAKER_ENGLISH_NER", "auto"),
+    )
+
+
 def _map_spans(mapper: Mapper, spans: list[Span]) -> list[MappedSpan]:
     """Map spans to entries, full names first so short forms coalesce.
 
@@ -98,6 +110,7 @@ def _map_spans(mapper: Mapper, spans: list[Span]) -> list[MappedSpan]:
         s = spans[i]
         return (type_rank.get(s.type, 2), -len(s.value.split()), -len(s.value), i)
 
+    mapper.reserve(s.value for s in spans)
     entries: dict[int, object] = {}
     for i in sorted(range(len(spans)), key=order):
         entries[i] = mapper.map(spans[i].type, spans[i].value)
@@ -112,8 +125,10 @@ def preview_docx(
     *,
     use_ner: bool = True,
     seed: int | None = 42,
+    ner: str | None = None,
+    english_ner: str | None = None,
 ) -> tuple[CleanSession, list[PreviewEntity]]:
-    pipeline = DetectionPipeline(use_ner=use_ner)
+    pipeline = make_pipeline(use_ner=use_ner, ner=ner, english_ner=english_ner)
     mapper = Mapper(seed=seed)
     doc, handles = docx_io.load(input_path)
 
@@ -145,8 +160,10 @@ def preview_text(
     *,
     use_ner: bool = True,
     seed: int | None = 42,
+    ner: str | None = None,
+    english_ner: str | None = None,
 ) -> tuple[CleanSession, list[PreviewEntity]]:
-    pipeline = DetectionPipeline(use_ner=use_ner)
+    pipeline = make_pipeline(use_ner=use_ner, ner=ner, english_ner=english_ner)
     mapper = Mapper(seed=seed)
     text = text_io.read_text(input_path)
 
@@ -215,8 +232,10 @@ def clean_docx(
     *,
     use_ner: bool = True,
     seed: int | None = 42,
+    ner: str | None = None,
+    english_ner: str | None = None,
 ) -> Mapper:
-    session, _ = preview_docx(input_path, use_ner=use_ner, seed=seed)
+    session, _ = preview_docx(input_path, use_ner=use_ner, seed=seed, ner=ner, english_ner=english_ner)
     finalize(session, output_path, mapping_path)
     return session.mapper
 
@@ -228,8 +247,10 @@ def clean_text(
     *,
     use_ner: bool = True,
     seed: int | None = 42,
+    ner: str | None = None,
+    english_ner: str | None = None,
 ) -> Mapper:
-    session, _ = preview_text(input_path, use_ner=use_ner, seed=seed)
+    session, _ = preview_text(input_path, use_ner=use_ner, seed=seed, ner=ner, english_ner=english_ner)
     finalize(session, output_path, mapping_path)
     return session.mapper
 
