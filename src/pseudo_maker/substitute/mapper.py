@@ -53,6 +53,9 @@ class Mapper:
         self.rng = random.Random(seed)
         self._by_key: dict[tuple[str, str], MappingEntry] = {}
         self._used_fakes: set[str] = set()
+        # Real values (and name parts) in the document; fakes must never equal
+        # one, or restore can't tell a fake from a real value.
+        self._reserved: set[str] = set()
         self._next_id = 1
 
     def _new_id(self) -> str:
@@ -60,10 +63,50 @@ class Mapper:
         self._next_id += 1
         return eid
 
+    _NOT_RESERVED = {
+        "ab", "hb", "kb", "(publ)", "aktiebolag", "ltd", "inc", "llc", "plc", "gmbh", "ag",
+        "och", "and", "&", "i", "på", "of",
+    }
+
+    def reserve(self, originals) -> None:
+        """Register every real value of the document before mapping starts.
+
+        Name-like parts (≥ 3 letters, not legal suffixes or particles) are
+        reserved too, so a fake never reuses a real first name or surname.
+        """
+        for o in originals:
+            self._reserved.add(o.lower())
+            for p in re.split(r"[\s\-]+", o.lower()):
+                if len(p) >= 3 and p.isalpha() and p not in self._NOT_RESERVED and p not in sv.NAME_PARTICLES:
+                    self._reserved.add(p)
+
+    def _collides(self, candidate: str, original: str, entity_type: str = "") -> bool:
+        if candidate == original or candidate in self._used_fakes:
+            return True
+        c = candidate.lower()
+        if c in self._reserved:
+            return True
+        if any(p in self._reserved for p in re.split(r"[\s\-]+", c) if p):
+            return True
+        if entity_type == "PERSON" and len(candidate.split()) >= 2:
+            # Unrelated people must not share a fake surname: the LLM would
+            # read "Ann-Marie Johansson" and "Elis Johansson" as family.
+            fake_last = candidate.split()[-1].lower()
+            orig_last = original.split()[-1].lower()
+            for (t, _), e in self._by_key.items():
+                if t == "PERSON" and len(e.fake.split()) >= 2 and e.fake.split()[-1].lower() == fake_last \
+                        and e.original.split()[-1].lower() != orig_last:
+                    return True
+        return False
+
     def _unique_fake(self, entity_type: str, original: str, **hints) -> str:
         for _ in range(50):
             candidate = generate_fake(entity_type, original, self.rng, **hints)
-            if candidate not in self._used_fakes and candidate != original:
+            if entity_type in GENITIVE_TYPES:
+                bad = self._collides(candidate, original, entity_type)   # word-like: check name parts too
+            else:
+                bad = candidate in self._used_fakes or candidate == original
+            if not bad:
                 self._used_fakes.add(candidate)
                 return candidate
         # Last-resort suffix to guarantee uniqueness
@@ -126,6 +169,13 @@ class Mapper:
         if key in self._by_key:
             entry = self._by_key[key]
             entry.occurrences += 1
+            if original != entry.original and original not in entry.aliases:
+                # Same value in another casing ("BLÅVAL" vs "Blåval"): give it a
+                # matching-case fake so restore can bring back the exact casing.
+                rendered = self.fake_for_alias(entry, original)
+                if rendered != entry.fake:
+                    entry.aliases.add(original)
+                    entry.fake_aliases[original] = rendered
             return entry
 
         if entity_type in ALIAS_TYPES:
@@ -186,7 +236,9 @@ class Mapper:
         for _ in range(50):
             head = generate_fake("PERSON", " ".join(original.split()[:-1]) + " X", self.rng).split()[:-1]
             candidate = sv.match_case(original, " ".join(head + [fake_last]))
-            if candidate not in self._used_fakes:
+            if candidate not in self._used_fakes and not any(
+                p in self._reserved for p in re.split(r"[\s\-]+", " ".join(head).lower()) if p
+            ):
                 break
         self._used_fakes.add(candidate)
         entry = MappingEntry(id=self._new_id(), type="PERSON", original=original, fake=candidate, occurrences=1)
@@ -201,7 +253,7 @@ class Mapper:
         'Annas'                                                → 'Evas'
         """
         if _normalize(alias_text) == _normalize(entry.original):
-            return entry.fake
+            return entry.fake if alias_text == entry.original else sv.match_case(alias_text, entry.fake)
         base = entry.genitive_of.get(alias_text)
         if base is not None:
             return sv.genitive(self.fake_for_alias(entry, base))

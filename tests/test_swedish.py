@@ -1,6 +1,8 @@
 """Swedish-specific behaviour: grammar, name shape, number formats, restore."""
 from __future__ import annotations
 
+import pytest
+
 import json
 import random
 import re
@@ -46,6 +48,7 @@ def test_genitive_rules():
     assert genitive("ANNA") == "ANNAS"
 
 
+@pytest.mark.usefixtures("needs_ner")
 def test_genitive_coalesces_with_base_name_in_any_order(tmp_path: Path):
     # Genitive appears *before* the full name in the document.
     src = tmp_path / "a.txt"
@@ -221,6 +224,7 @@ def test_currency_is_not_a_license_plate():
 
 # --- end to end ---------------------------------------------------------------------
 
+@pytest.mark.usefixtures("needs_ner")
 def test_caps_names_and_propagated_surnames(tmp_path: Path):
     src = tmp_path / "a.txt"
     src.write_text(
@@ -237,6 +241,7 @@ def test_caps_names_and_propagated_surnames(tmp_path: Path):
     assert restored.read_text(encoding="utf-8") == src.read_text(encoding="utf-8")
 
 
+@pytest.mark.usefixtures("needs_ner")
 def test_restore_llm_reply_with_new_genitives_and_bare_names(tmp_path: Path):
     src = tmp_path / "a.txt"
     src.write_text("Anna-Karin Lindqvist anställs av Nordström Bygg AB. Chef är Per Åkesson.", encoding="utf-8")
@@ -279,3 +284,15 @@ def test_family_members_share_fake_surname():
     assert son is not mother
     assert son.fake.split()[-1] == mother.fake.split()[-1]
     assert son.fake != mother.fake
+
+pytestmark = pytest.mark.usefixtures("ner_backend")
+
+
+def test_unrelated_people_get_different_fake_surnames():
+    m = Mapper(seed=0)
+    fakes_ = [m.map("PERSON", n).fake for n in (
+        "Anna-Karin Lindqvist", "Per Åkesson", "Erik Svensson", "Maria Holm", "Johan Berg",
+        "Sara Nyberg", "Lars Nilsson", "Karin Wallin", "Olle Ek", "Ebba Strand",
+    )]
+    surnames = [f.split()[-1] for f in fakes_]
+    assert len(set(surnames)) == len(surnames), fakes_

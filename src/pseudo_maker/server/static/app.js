@@ -95,12 +95,37 @@ function validateForType(type, value) {
 
 // ---- Clean flow ---------------------------------------------------------
 
+const TYPE_OPTIONS = [
+  ['PERSON', 'Person'],
+  ['COMPANY', 'Company / organisation'],
+  ['CITY', 'City / place'],
+  ['STREET', 'Street / address'],
+  ['EMAIL', 'Email'],
+  ['PHONE', 'Phone'],
+  ['PERSONNUMMER', 'Personnummer'],
+  ['ORGNR', 'Org.nr'],
+  ['ID_NUMBER', 'ID / account number'],
+  ['CASE_NUMBER', 'Case number'],
+  ['DATE', 'Date'],
+  ['CUSTOM', 'Other (placeholder)'],
+];
+
+function typeSelectHtml(selected, cls = 'type-select') {
+  const known = TYPE_OPTIONS.some(([v]) => v === selected);
+  const sel = known ? selected : 'CUSTOM';
+  return `<select class="${cls}">${TYPE_OPTIONS.map(([v, label]) =>
+    `<option value="${v}"${v === sel ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('')}</select>`;
+}
+
 const cleanState = {
   sessionId: null,
   entities: [],
+  candidates: [],
+  document: [],
   excluded: new Set(),
   customFakes: new Map(), // entity_id → user-chosen fake (string)
   currentFakes: new Map(), // entity_id → current fake (auto or custom), used for duplicate detection
+  view: 'table',
 };
 
 function wireDropzone(zone, input, onFile) {
@@ -121,6 +146,7 @@ function wireDropzone(zone, input, onFile) {
 }
 
 wireDropzone($('#dropzone-clean'), $('#file-clean'), uploadClean);
+$('#add-term-type').outerHTML = typeSelectHtml('PERSON', 'type-select').replace('<select', '<select id="add-term-type"');
 
 async function uploadClean(file) {
   showStage('panel-clean', 'clean-processing');
@@ -131,16 +157,74 @@ async function uploadClean(file) {
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
     cleanState.sessionId = data.session_id;
-    cleanState.entities = data.entities;
     cleanState.excluded = new Set();
     cleanState.customFakes = new Map();
-    cleanState.currentFakes = new Map(data.entities.map((e) => [e.id, e.fake]));
-    renderEntities();
+    applyPreviewState(data);
+    $('#add-term-msg').hidden = true;
     showStage('panel-clean', 'clean-preview');
   } catch (err) {
     showCleanError(err);
   }
 }
+
+/** Take a server preview state ({entities, candidates, document}) and re-render everything. */
+function applyPreviewState(data) {
+  cleanState.entities = data.entities;
+  cleanState.candidates = data.candidates || [];
+  cleanState.document = data.document || [];
+  const ids = new Set(data.entities.map((e) => e.id));
+  cleanState.excluded = new Set([...cleanState.excluded].filter((id) => ids.has(id)));
+  cleanState.currentFakes = new Map(data.entities.map((e) => [e.id, e.fake]));
+  renderEntities();
+  renderDocument();
+  renderAmbiguous();
+}
+
+async function postForm(url, fields) {
+  const body = new FormData();
+  for (const [k, v] of Object.entries(fields)) body.append(k, v);
+  const res = await fetch(url, { method: 'POST', body });
+  if (!res.ok) {
+    let msg = await res.text();
+    try { msg = JSON.parse(msg).detail || msg; } catch (_) { /* plain text */ }
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
+async function addTerm(term, type) {
+  const data = await postForm('/api/clean/add-term', { session_id: cleanState.sessionId, term, type });
+  applyPreviewState(data);
+  return data.added;
+}
+
+async function setFake(entityId, fake) {
+  const data = await postForm('/api/clean/set-fake', { session_id: cleanState.sessionId, entity_id: entityId, fake });
+  applyPreviewState(data);
+}
+
+function setExcluded(id, excluded) {
+  if (excluded) cleanState.excluded.add(id); else cleanState.excluded.delete(id);
+  const cb = $(`#entity-body input[data-id="${id}"]`);
+  if (cb) {
+    cb.checked = !excluded;
+    cb.closest('tr').classList.toggle('unchecked', excluded);
+  }
+  renderDocument();
+}
+
+// ---- View switch
+
+$$('.view-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    cleanState.view = btn.dataset.view;
+    $$('.view-btn').forEach((b) => b.classList.toggle('active', b === btn));
+    $$('#clean-preview .view').forEach((v) => v.classList.toggle('active', v.id === `view-${cleanState.view}`));
+    hidePopover();
+  });
+});
+
+// ---- Table view
 
 function renderEntities() {
   const body = $('#entity-body');
@@ -150,10 +234,17 @@ function renderEntities() {
     const tr = document.createElement('tr');
     tr.dataset.id = e.id;
     tr.dataset.type = e.type;
+    const excluded = cleanState.excluded.has(e.id);
+    if (excluded) tr.classList.add('unchecked');
+    if (cleanState.customFakes.has(e.id)) tr.classList.add('edited');
+    const badges = [
+      e.uncertain ? `<span class="flag uncertain" title="Lowest model confidence ${Math.round(e.confidence * 100)}%">uncertain</span>` : '',
+      (e.sources || []).includes('manual') ? '<span class="flag manual" title="Added by you">added</span>' : '',
+    ].join('');
     tr.innerHTML = `
-      <td class="col-check"><input type="checkbox" data-id="${e.id}" checked /></td>
+      <td class="col-check"><input type="checkbox" data-id="${e.id}" ${excluded ? '' : 'checked'} /></td>
       <td><span class="type-badge">${escapeHtml(e.type)}</span></td>
-      <td class="col-original">${escapeHtml(e.original)}${e.aliases.length ? ` <span class="muted">(+${e.aliases.length} alias)</span>` : ''}</td>
+      <td class="col-original">${escapeHtml(e.original)}${e.aliases.length ? ` <span class="muted">(+${e.aliases.length} alias)</span>` : ''} ${badges}</td>
       <td class="col-fake">
         <span class="fake-display" tabindex="0">${escapeHtml(e.fake)}</span>
         <span class="fake-warning" hidden></span>
@@ -163,7 +254,7 @@ function renderEntities() {
     body.appendChild(tr);
   }
   body.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
-    cb.addEventListener('change', onCheckboxChange);
+    cb.addEventListener('change', (ev) => setExcluded(ev.currentTarget.dataset.id, !ev.currentTarget.checked));
   });
   body.querySelectorAll('.fake-display').forEach((el) => {
     el.addEventListener('click', (e) => beginEdit(e.currentTarget.closest('tr')));
@@ -176,17 +267,25 @@ function renderEntities() {
   });
 }
 
-function onCheckboxChange(e) {
-  const cb = e.currentTarget;
-  const id = cb.dataset.id;
-  const tr = cb.closest('tr');
-  if (cb.checked) {
-    cleanState.excluded.delete(id);
-    tr.classList.remove('unchecked');
-  } else {
-    cleanState.excluded.add(id);
-    tr.classList.add('unchecked');
+/** Soft checks for a new fake; returns a warning message or ''. */
+function fakeWarning(id, type, newVal) {
+  for (const [otherId, otherFake] of cleanState.currentFakes) {
+    if (otherId !== id && otherFake === newVal) return `also used for ${otherId}`;
   }
+  const v = validateForType(type, newVal);
+  return v.ok ? '' : v.message;
+}
+
+/** Validate and apply a new fake for an entity. Returns '' or a warning to show. */
+async function commitFake(id, newVal) {
+  const entry = cleanState.entities.find((e) => e.id === id);
+  newVal = newVal.trim();
+  if (!entry || !newVal || newVal === entry.fake) return '';
+  if (newVal === entry.original) return 'same as original — not changed';
+  const warning = fakeWarning(id, entry.type, newVal);
+  cleanState.customFakes.set(id, newVal);
+  await setFake(id, newVal);
+  return warning;
 }
 
 function beginEdit(tr) {
@@ -195,14 +294,12 @@ function beginEdit(tr) {
   const cell = tr.querySelector('.col-fake');
   const display = cell.querySelector('.fake-display');
   const warn = cell.querySelector('.fake-warning');
-  const current = display.textContent;
   const id = tr.dataset.id;
-  const type = tr.dataset.type;
 
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'fake-input';
-  input.value = current;
+  input.value = display.textContent;
   input.setAttribute('spellcheck', 'false');
   input.setAttribute('autocomplete', 'off');
 
@@ -212,52 +309,27 @@ function beginEdit(tr) {
   input.focus();
   input.select();
 
-  const commit = () => {
-    const newVal = input.value.trim();
-    const entry = cleanState.entities.find((e) => e.id === id);
-    if (!newVal) {
-      // empty → revert
-      input.remove();
-      display.hidden = false;
-      return;
-    }
-    if (newVal === entry.original) {
-      input.remove();
-      display.hidden = false;
-      showWarn(warn, 'same as original — reverted');
-      return;
-    }
-    // Duplicate detection against other rows' current fakes
-    for (const [otherId, otherFake] of cleanState.currentFakes) {
-      if (otherId !== id && otherFake === newVal) {
-        showWarn(warn, `also used for ${otherId}`);
-        break;
+  let done = false;
+  const commit = async () => {
+    if (done) return;
+    done = true;
+    try {
+      const warning = await commitFake(id, input.value);
+      if (warning) {
+        const w = $(`#entity-body tr[data-id="${id}"] .fake-warning`);
+        if (w) showWarn(w, warning);
       }
+    } catch (err) {
+      showWarn(warn, err.message);
     }
-    // Soft format validation
-    const v = validateForType(type, newVal);
-    if (!v.ok) {
-      showWarn(warn, v.message);
-    }
-    display.textContent = newVal;
-    display.hidden = false;
     input.remove();
-    if (newVal !== entry.fake) {
-      cleanState.customFakes.set(id, newVal);
-      tr.classList.add('edited');
-    } else {
-      cleanState.customFakes.delete(id);
-      tr.classList.remove('edited');
-    }
-    cleanState.currentFakes.set(id, newVal);
+    display.hidden = false;
   };
-
   const cancel = () => {
+    done = true;
     input.remove();
     display.hidden = false;
-    warn.hidden = true;
   };
-
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); commit(); }
     else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
@@ -272,22 +344,251 @@ function showWarn(el, message) {
 
 $('#select-all').addEventListener('click', () => {
   cleanState.excluded.clear();
-  $$('#entity-body input[type="checkbox"]').forEach((cb) => { cb.checked = true; cb.closest('tr').classList.remove('unchecked'); });
+  renderEntities();
+  renderDocument();
 });
 $('#select-none').addEventListener('click', () => {
   cleanState.excluded = new Set(cleanState.entities.map((e) => e.id));
-  $$('#entity-body input[type="checkbox"]').forEach((cb) => { cb.checked = false; cb.closest('tr').classList.add('unchecked'); });
+  renderEntities();
+  renderDocument();
 });
 
+// ---- Document view
+
+$('#show-originals').addEventListener('change', renderDocument);
+
+function renderDocument() {
+  const view = $('#doc-view');
+  const showOriginals = $('#show-originals').checked;
+  const entityById = new Map(cleanState.entities.map((e) => [e.id, e]));
+  const parts = [];
+  let blankRun = 0;
+  cleanState.document.forEach((para, pi) => {
+    if (!para.text.trim()) {
+      if (++blankRun === 1 && parts.length) parts.push('<p class="doc-para blank"></p>');
+      return;
+    }
+    blankRun = 0;
+    const marks = [
+      ...para.spans.map((s, si) => ({ ...s, kind: 'sub', si })),
+      ...para.candidates.map((c, ci) => ({ ...c, kind: 'cand', ci })),
+    ].sort((a, b) => a.start - b.start);
+    let html = '';
+    let pos = 0;
+    for (const m of marks) {
+      if (m.start < pos) continue; // never nest
+      html += escapeHtml(para.text.slice(pos, m.start));
+      const original = para.text.slice(m.start, m.end);
+      if (m.kind === 'sub') {
+        const e = entityById.get(m.entity_id);
+        const excluded = cleanState.excluded.has(m.entity_id);
+        const shown = excluded || showOriginals ? original : m.fake;
+        const cls = ['sub', excluded ? 'excluded' : '', e && e.uncertain ? 'uncertain' : ''].join(' ');
+        const tip = excluded ? `Kept as-is (${e ? e.type : ''})` : `${original} → ${m.fake}`;
+        html += `<mark class="${cls}" data-eid="${m.entity_id}" data-pi="${pi}" data-si="${m.si}" title="${escapeHtml(tip)}">${escapeHtml(shown)}</mark>`;
+      } else {
+        html += `<span class="cand" data-pi="${pi}" data-ci="${m.ci}" title="Possibly sensitive — click to add">${escapeHtml(original)}</span>`;
+      }
+      pos = m.end;
+    }
+    html += escapeHtml(para.text.slice(pos));
+    parts.push(`<p class="doc-para">${html}</p>`);
+  });
+  view.innerHTML = parts.join('') || '<p class="muted">The document is empty.</p>';
+}
+
+$('#doc-view').addEventListener('click', (ev) => {
+  const mark = ev.target.closest('mark.sub');
+  if (mark) {
+    ev.stopPropagation();
+    openEntityPopover(mark);
+    return;
+  }
+  const cand = ev.target.closest('.cand');
+  if (cand) {
+    ev.stopPropagation();
+    const para = cleanState.document[+cand.dataset.pi];
+    const c = para.candidates[+cand.dataset.ci];
+    const info = cleanState.candidates.find((x) => x.type === c.type && x.value.toLowerCase() === c.value.toLowerCase());
+    openAddPopover(cand, c.value, c.type, info ? info.reason : '');
+  }
+});
+
+$('#doc-view').addEventListener('mouseup', () => {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed) return;
+  const text = sel.toString().replace(/\s+/g, ' ').trim();
+  if (text.length < 2 || text.length > 120) return;
+  if (!$('#doc-view').contains(sel.anchorNode)) return;
+  const rect = sel.getRangeAt(0).getBoundingClientRect();
+  openAddPopover(rect, text, guessType(text), 'Selected text');
+});
+
+function guessType(text) {
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) return 'EMAIL';
+  if (/^\+?[\d\s\-()]{7,}$/.test(text)) return 'PHONE';
+  if (/\d/.test(text)) return 'ID_NUMBER';
+  if (/\b(AB|HB|KB|Ltd|Inc|GmbH)\b/.test(text)) return 'COMPANY';
+  if (/^[A-ZÅÄÖ][\wåäöé-]+(\s+[A-ZÅÄÖ][\wåäöé-]+){0,2}$/.test(text)) return 'PERSON';
+  return 'CUSTOM';
+}
+
+// ---- Popover
+
+const popover = $('#popover');
+
+function placePopover(anchor) {
+  const r = anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : anchor;
+  popover.hidden = false;
+  const pw = popover.offsetWidth;
+  const left = Math.min(Math.max(8, r.left + window.scrollX), window.scrollX + document.documentElement.clientWidth - pw - 8);
+  popover.style.left = `${left}px`;
+  popover.style.top = `${r.bottom + window.scrollY + 6}px`;
+}
+
+function hidePopover() {
+  popover.hidden = true;
+  popover.innerHTML = '';
+}
+
+document.addEventListener('mousedown', (ev) => {
+  if (!popover.hidden && !popover.contains(ev.target) && !ev.target.closest('mark.sub, .cand')) hidePopover();
+});
+document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') hidePopover(); });
+
+function openEntityPopover(mark) {
+  const id = mark.dataset.eid;
+  const e = cleanState.entities.find((x) => x.id === id);
+  if (!e) return;
+  const para = cleanState.document[+mark.dataset.pi];
+  const span = para.spans[+mark.dataset.si];
+  const occurrenceText = para.text.slice(span.start, span.end);
+  const excluded = cleanState.excluded.has(id);
+  popover.innerHTML = `
+    <div class="pop-head"><span class="type-badge">${escapeHtml(e.type)}</span>
+      ${e.uncertain ? '<span class="flag uncertain">uncertain</span>' : ''}
+      <span class="muted">${e.occurrences}× in document</span></div>
+    <div class="pop-row"><span class="pop-label">Original</span><span class="pop-original">${escapeHtml(e.original)}</span></div>
+    ${occurrenceText !== e.original ? `<div class="pop-row"><span class="pop-label">Here</span><span>${escapeHtml(occurrenceText)} → ${escapeHtml(span.fake)}</span></div>` : ''}
+    <label class="pop-row"><span class="pop-label">Replace with</span>
+      <input type="text" class="fake-input pop-fake" value="${escapeHtml(e.fake)}" spellcheck="false" autocomplete="off" /></label>
+    <p class="fake-warning pop-warn" hidden></p>
+    <label class="pop-check"><input type="checkbox" class="pop-replace" ${excluded ? '' : 'checked'} /> Replace in the cleaned document</label>
+    <div class="pop-actions">
+      <button class="primary small pop-save">Save</button>
+      <button class="secondary small pop-cancel">Close</button>
+    </div>`;
+  placePopover(mark);
+  const input = popover.querySelector('.pop-fake');
+  input.focus();
+  input.select();
+  const save = async () => {
+    const replace = popover.querySelector('.pop-replace').checked;
+    try {
+      const warning = await commitFake(id, input.value);
+      setExcluded(id, !replace);
+      if (warning) { showWarn(popover.querySelector('.pop-warn'), warning); return; }
+      hidePopover();
+    } catch (err) {
+      showWarn(popover.querySelector('.pop-warn'), err.message);
+    }
+  };
+  popover.querySelector('.pop-save').addEventListener('click', save);
+  popover.querySelector('.pop-cancel').addEventListener('click', hidePopover);
+  input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); save(); } });
+}
+
+function openAddPopover(anchor, value, type, reason) {
+  popover.innerHTML = `
+    <div class="pop-head"><span class="muted">${escapeHtml(reason || 'Add as sensitive term')}</span></div>
+    <div class="pop-row"><span class="pop-label">Term</span><span class="pop-original">${escapeHtml(value)}</span></div>
+    <label class="pop-row"><span class="pop-label">Type</span>${typeSelectHtml(type)}</label>
+    <p class="fake-warning pop-warn" hidden></p>
+    <div class="pop-actions">
+      <button class="primary small pop-add">Replace everywhere</button>
+      <button class="secondary small pop-cancel">Close</button>
+    </div>`;
+  placePopover(anchor);
+  popover.querySelector('.pop-add').addEventListener('click', async () => {
+    const t = popover.querySelector('select').value;
+    try {
+      const n = await addTerm(value, t);
+      if (!n) { showWarn(popover.querySelector('.pop-warn'), 'not found as a whole word (or already replaced)'); return; }
+      hidePopover();
+      window.getSelection().removeAllRanges();
+    } catch (err) {
+      showWarn(popover.querySelector('.pop-warn'), err.message);
+    }
+  });
+  popover.querySelector('.pop-cancel').addEventListener('click', hidePopover);
+}
+
+// ---- Ambiguous list
+
+function renderAmbiguous() {
+  const list = $('#ambiguous-list');
+  const items = cleanState.candidates;
+  $('#ambiguous-count').textContent = `(${items.length})`;
+  $('#ambiguous').classList.toggle('empty', items.length === 0);
+  if (!items.length) {
+    list.innerHTML = '<li class="muted">Nothing ambiguous found.</li>';
+    return;
+  }
+  list.innerHTML = items.map((c) => `
+    <li data-cid="${c.id}">
+      <span class="amb-value">${escapeHtml(c.value)}</span>
+      <span class="muted">${c.occurrences}×</span>
+      <span class="amb-reason muted">${escapeHtml(c.reason)}${c.reason.startsWith('low') ? ` (${Math.round(c.score * 100)}%)` : ''}</span>
+      ${typeSelectHtml(c.type)}
+      <button class="secondary small amb-add">Add</button>
+    </li>`).join('');
+  list.querySelectorAll('.amb-add').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const li = btn.closest('li');
+      const c = cleanState.candidates.find((x) => x.id === li.dataset.cid);
+      btn.disabled = true;
+      try {
+        await addTerm(c.value, li.querySelector('select').value);
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = '⚠ retry';
+        btn.title = err.message;
+      }
+    });
+  });
+}
+
+// ---- Add a term
+
+$('#add-term-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const input = $('#add-term-input');
+  const term = input.value.trim();
+  const msg = $('#add-term-msg');
+  if (!term) return;
+  try {
+    const n = await addTerm(term, $('#add-term-type').value);
+    msg.textContent = n
+      ? `✓ Replaced ${n} occurrence${n === 1 ? '' : 's'} of “${term}”.`
+      : `“${term}” wasn't found as a whole word, or it's already replaced.`;
+    msg.className = `add-term-msg ${n ? 'ok' : 'warn'}`;
+    if (n) input.value = '';
+  } catch (err) {
+    msg.textContent = `⚠ ${err.message}`;
+    msg.className = 'add-term-msg warn';
+  }
+  msg.hidden = false;
+});
+
+// ---- Finalize
+
 $('#finalize-btn').addEventListener('click', async () => {
+  hidePopover();
   showStage('panel-clean', 'clean-processing');
   try {
     const body = new FormData();
     body.append('session_id', cleanState.sessionId);
     body.append('excluded_ids', Array.from(cleanState.excluded).join(','));
-    if (cleanState.customFakes.size > 0) {
-      body.append('custom_fakes', JSON.stringify(Object.fromEntries(cleanState.customFakes)));
-    }
     const res = await fetch('/api/clean/finalize', { method: 'POST', body });
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
@@ -312,13 +613,18 @@ $('#clean-again-btn').addEventListener('click', resetCleanFlow);
 $('#clean-error-reset').addEventListener('click', resetCleanFlow);
 
 function resetCleanFlow() {
+  hidePopover();
   closeSession(cleanState.sessionId);
   cleanState.sessionId = null;
   cleanState.entities = [];
+  cleanState.candidates = [];
+  cleanState.document = [];
   cleanState.excluded = new Set();
   cleanState.customFakes = new Map();
   cleanState.currentFakes = new Map();
   $('#file-clean').value = '';
+  $('#add-term-input').value = '';
+  $('#add-term-msg').hidden = true;
   showStage('panel-clean', 'clean-upload');
 }
 

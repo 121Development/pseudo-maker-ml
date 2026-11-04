@@ -1,4 +1,7 @@
-"""Pattern-based Swedish company names and street addresses.
+"""Pattern-based company names and street addresses (source="pattern").
+
+Pattern spans compete with model spans by length (unlike checksum/regex IDs,
+which always win), so "Sandvik Coromant" from the model beats "Sandvik" here.
 
 These complement spaCy NER, which often misses the legal suffix
 ("Nordström Bygg AB (publ)") or the house number ("Storgatan 12B").
@@ -13,7 +16,8 @@ from .base import Span
 _CAP = r"[A-ZÅÄÖÉ][\wåäöÅÄÖéü&.\-]*"
 _COMPANY = re.compile(
     rf"\b({_CAP}(?:[ \t]+(?:{_CAP}|&|och|i|på))*?)[ \t]+"
-    r"(AB|HB|KB|Aktiebolag|Handelsbolag|Kommanditbolag)\b([ \t]*\(publ\))?"
+    r"(AB|HB|KB|Aktiebolag|Handelsbolag|Kommanditbolag|Ltd\.?|Limited|Inc\.?|LLC|LLP|plc|PLC|"
+    r"GmbH|AG|Oy|Oyj|ASA|A/S|B\.V\.|N\.V\.|S\.A\.|Corp\.?|Corporation|Solicitors)(?![\w])([ \t]*\(publ\))?"
 )
 
 # Capitalised words that start sentences / clauses in contracts and are not
@@ -55,7 +59,7 @@ class CompanySeRecognizer:
                 continue
             start = text.index(words[0], m.start(1))
             end = m.end()
-            yield Span(start, end, self.name, text[start:end], 0.9, "regex")
+            yield Span(start, end, self.name, text[start:end], 0.9, "pattern")
 
 
 class StreetSeRecognizer:
@@ -63,7 +67,7 @@ class StreetSeRecognizer:
 
     def find(self, text: str) -> Iterable[Span]:
         for m in _STREET.finditer(text):
-            yield Span(m.start(), m.end(), self.name, m.group(0), 0.9, "regex")
+            yield Span(m.start(), m.end(), self.name, m.group(0), 0.9, "pattern")
 
 
 # Large Swedish employers / brands that spaCy frequently misses or truncates.
@@ -82,6 +86,15 @@ KNOWN_SWEDISH_COMPANIES = [
     "Vasakronan", "Castellum", "Fabege", "Atrium Ljungberg", "Kinnevik",
     "Lindex", "KappAhl", "Kappahl", "Åhléns", "Willys", "Hemköp", "Mathem",
     "Avanza", "Nordnet", "Collector", "Resurs Bank", "SBAB", "Söderberg & Partners",
+    "Ramböll", "WSP", "Capgemini", "King", "Mojang", "Truecaller", "Einride", "Voi",
+    "Sandvik Coromant", "Hemköp", "Sahlgrenska",
+    # International employers frequent in Swedish CVs and contracts
+    "Google", "Microsoft", "Amazon", "Apple", "Meta", "Facebook", "Netflix", "IBM", "Oracle",
+    "SAP", "Cisco", "Intel", "Nvidia", "Samsung", "Nokia", "Siemens", "Bosch", "Philips",
+    "Accenture", "Deloitte", "PwC", "KPMG", "EY", "Ernst & Young", "McKinsey", "BCG",
+    "Bain", "Capgemini", "Sogeti", "Tieto", "CGI", "Cognizant", "Infosys", "TCS",
+    "Vodafone", "Barclays", "HSBC", "Danske Bank", "DNB", "Unilever", "Nestlé", "Shell",
+    "Maersk", "Novo Nordisk", "Equinor", "Uber", "Airbnb", "Salesforce",
 ]
 _KNOWN_CO = re.compile(
     r"(?<![\w@.])(" + "|".join(re.escape(c) for c in sorted(KNOWN_SWEDISH_COMPANIES, key=len, reverse=True)) + r")"
@@ -93,9 +106,17 @@ _KNOWN_CO = re.compile(
 )
 
 
+# Swedish sports clubs: "IFK Norrköping", "AIK", "Malmö FF", "IK Sirius".
+_CLUB = re.compile(
+    r"\b(?:(?:IFK|AIK|IK|IF|BK|GIF|HK|SK)[ \t]+[A-ZÅÄÖ][\wåäö]+|[A-ZÅÄÖ][\wåäö]+[ \t]+(?:FF|BK|IF|IK|HK|SK))\b"
+)
+
+
 class KnownCompanySeRecognizer:
     name = "COMPANY"
 
     def find(self, text: str) -> Iterable[Span]:
         for m in _KNOWN_CO.finditer(text):
-            yield Span(m.start(), m.end(), self.name, m.group(0), 0.9, "regex")
+            yield Span(m.start(), m.end(), self.name, m.group(0), 0.9, "pattern")
+        for m in _CLUB.finditer(text):
+            yield Span(m.start(), m.end(), self.name, m.group(0), 0.8, "pattern")

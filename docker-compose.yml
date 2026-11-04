@@ -1,10 +1,10 @@
 services:
-  pseudo-maker:
+  pseudo-maker-ml:
     build:
       context: .
       dockerfile: Dockerfile
-    image: pseudo-maker:latest
-    container_name: pseudo-maker
+    image: pseudo-maker-ml:latest
+    container_name: pseudo-maker-ml
     restart: unless-stopped
     # Expose to the LAN. Operator restricts reachability via host firewall or
     # by binding to a specific internal IP: "192.168.10.5:8765:8765".

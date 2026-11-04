@@ -14,6 +14,17 @@ class Span:
     source: str = "regex"
 
 
+@dataclass(frozen=True)
+class Candidate:
+    """A possible entity the pipeline did NOT replace (shown as "ambiguous" in the UI)."""
+    start: int
+    end: int
+    type: str
+    value: str
+    score: float
+    reason: str
+
+
 class Recognizer(Protocol):
     name: str
 
