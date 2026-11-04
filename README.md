@@ -1,10 +1,51 @@
 # Pseudo Maker ML
 
-> ML variant of [pseudo-maker](https://github.com/121Development/pseudo-maker). It detects names, companies and places with two NER models: **KB-BERT** for Swedish and **Rampart** for English. Hard-coded rules sit underneath as the fallback for structured IDs and edge cases.
+**Use public LLMs on sensitive Swedish documents without sending them any personal data.**
 
-Anonymize Swedish (and English) PII in documents so you can safely share them with public LLMs, then restore the originals on the way back.
+Pseudo Maker replaces every personal or identifying detail in a document with a realistic fake, and keeps a local key. You work with ChatGPT, Claude or another LLM on the cleaned version, then put the LLM's answer back through the tool to swap the real values back in. Your files and the key never leave your machine.
 
-Upload a Word document (or plain text / Markdown). The tool detects person names, company names, Swedish personnummer and organisationsnummer, addresses, phone numbers, emails, bank details and more. Each detection gets replaced by a realistic Swedish-locale substitute — personnummer with a valid checksum, `Anna Andersson` → `Karin Berg`, `Volvo AB` → `Åkesson AB`. You get a cleaned file plus a mapping file. Paste the cleaned text into ChatGPT (or similar), save the response, then restore to get the originals back — with a per-session audit log of what was substituted.
+It is built for Swedish documents: contracts, case files, HR documents, CVs. It also handles English and mixed Swedish/English text.
+
+```
+Original   Anna-Karin Lindqvist (19850312-2387) anställs av Nordström Bygg AB (publ), org.nr 556677-8899.
+           Annas chef är Per Åkesson. Hon bor på Storgatan 12B, 211 34 Malmö.
+
+Cleaned    Ann-Marie Söderström (19830920-0387) anställs av Berglund Palmqvist AB (publ), org.nr 543525-5343.
+           Anns chef är Daniel Haglund. Hon bor på Backvägen 71C, 333 98 Mölndal.
+```
+
+The fakes are realistic, so the LLM's answer stays natural and easy to map back:
+- Personnummer and orgnr pass their checksums. Personnummer keep gender and roughly the same age.
+- Names keep their gender (*hon/han* still fits), hyphenation and genitive (`Annas` → `Anns`).
+- The same person always gets the same fake throughout the document.
+
+### What's in it
+
+- **Web UI and CLI.** Upload a `.docx`, `.txt` or `.md` file and review every detection in a preview table. Untick or edit any fake, then download the cleaned file and its mapping (the key). Word formatting (bold, tables, headers) is preserved.
+- **Restore with audit log.** Restore puts the originals back into the LLM's reply, including forms the LLM invents, such as genitives (`Söderströms` → `Lindqvists`) and bare first names. It writes an audit log of every substitution.
+- **Models first, rules as fallback.**
+  - Two NER models find names, companies and places: [KB-BERT](https://huggingface.co/KBLab/bert-base-swedish-cased-ner) from the National Library of Sweden for Swedish, and [Rampart](https://github.com/nationaldesignstudio/rampart) for English.
+  - Checksum-validated rules catch structured identifiers: personnummer, samordningsnummer, orgnr, IBAN, bankgiro, plusgiro, VAT, card numbers, phone numbers, emails, license plates, case numbers.
+  - Further rules handle the edge cases the models miss.
+- **Local and offline.** Both models run on CPU via ONNX (~140 MB in total). Nothing is sent anywhere at runtime.
+
+### Quick start
+
+```sh
+git clone https://github.com/121Development/pseudo-maker-ml && cd pseudo-maker-ml
+python -m venv .venv && source .venv/bin/activate
+pip install --index-url https://download.pytorch.org/whl/cpu torch   # only needed to build the KB-BERT model
+pip install -e ".[export,spacy]"
+python -m spacy download sv_core_news_lg                            # optional fallback model
+pseudo-maker fetch-models                                           # download Rampart, build KB-BERT (~2 min)
+pseudo-maker serve                                                  # opens http://127.0.0.1:8765
+```
+
+Docker and a single-file binary are described under [Getting started](#getting-started).
+
+### How it differs from pseudo-maker
+
+[pseudo-maker](https://github.com/121Development/pseudo-maker) uses spaCy's Swedish model plus rules. This ML variant puts KB-BERT and Rampart in front and keeps spaCy only as an optional fallback. On a held-out test set, the share of names, companies and places fully replaced goes from 83% to 95.5% (Swedish 90% → 100%, English 74% → 91%). The cost is slower detection, about 70 ms per paragraph on CPU. Details are under [Evaluation](#detection-models-first-rules-as-fallback).
 
 ## Workflow
 
@@ -33,8 +74,10 @@ The mapping file contains your real sensitive values — **keep it local**. The 
 | Organisations | Company names, Swedish organisationsnummer (Luhn), VAT |
 | Financial | IBAN, bankgiro, plusgiro, credit card |
 | Geographic | Swedish cities and streets (kept separately), postal codes |
-| Other identifiers | Swedish license plates, passport numbers, IP addresses, URLs |
+| Other identifiers | Swedish license plates, passport numbers, case/diary numbers (`Dnr`, `Mål nr`), other ID numbers (tax ID, driver's licence, account numbers), IP addresses, URLs |
 | Quasi-identifiers | Dates, ages |
+
+Left as-is on purpose: countries, public agencies (`Skatteverket`, `Försäkringskassan`), products and tools (`Teams`, `Excel`), job titles, weekdays.
 
 ### Detection: models first, rules as fallback
 
@@ -200,11 +243,18 @@ pseudo-maker restore reply.docx --mapping client_MAPPING.json
 # Dry-run: list detected entities without writing anything
 pseudo-maker detect client.docx
 
+# Choose models (default: auto = whatever is installed)
+pseudo-maker clean client.docx --ner kb --english-ner auto
+pseudo-maker clean client.docx --no-ner              # rules only
+
+# Download Rampart and build the KB-BERT ONNX model
+pseudo-maker fetch-models [--dest DIR] [--skip-kb]
+
 # Start the web UI
 pseudo-maker serve [--host 0.0.0.0] [--port 8765] [--no-browser]
 ```
 
-Run `pseudo-maker <cmd> --help` for the full option set (seed, NER toggle, fuzzy threshold, audit path, …).
+Run `pseudo-maker <cmd> --help` for the full option set (seed, NER modes, fuzzy threshold, audit path, …).
 
 ## Project layout
 
