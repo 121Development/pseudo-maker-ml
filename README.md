@@ -6,6 +6,8 @@ Pseudo Maker replaces every personal or identifying detail in a document with a 
 
 It is built for Swedish documents: contracts, case files, HR documents, CVs. It also handles English and mixed Swedish/English text.
 
+![Pseudo Maker ML document view: a Swedish employment contract with every name, number and address highlighted and replaced by a realistic fake, and a popover for editing one replacement](pseudo-maker-ml.png)
+
 ```
 Original   Anna-Karin Lindqvist (19850312-2387) anställs av Nordström Bygg AB (publ), org.nr 556677-8899.
            Annas chef är Per Åkesson. Hon bor på Storgatan 12B, 211 34 Malmö.
@@ -19,17 +21,66 @@ The fakes are realistic, so the LLM's answer stays natural and easy to map back:
 - Names keep their gender (*hon/han* still fits), hyphenation and genitive (`Annas` → `Anns`).
 - The same person always gets the same fake throughout the document.
 
-### What's in it
+## What's in it
 
-- **Web UI and CLI.** Upload a `.docx`, `.txt` or `.md` file and review every detection in a preview table. Untick or edit any fake, then download the cleaned file and its mapping (the key). Word formatting (bold, tables, headers) is preserved.
+- **Web UI and CLI.** Upload a `.docx`, `.txt` or `.md` file and review every detection, either in a table or in the document itself with each substitution highlighted. Untick or edit any fake, add findings the tool was unsure about, or add your own terms. Then download the cleaned file and its mapping (the key). Word formatting (bold, tables, headers) is preserved.
 - **Restore with audit log.** Restore puts the originals back into the LLM's reply, including forms the LLM invents, such as genitives (`Söderströms` → `Lindqvists`) and bare first names. It writes an audit log of every substitution.
 - **Models first, rules as fallback.**
-  - Two NER models find names, companies and places: [KB-BERT](https://huggingface.co/KBLab/bert-base-swedish-cased-ner) from the National Library of Sweden for Swedish, and [Rampart](https://github.com/nationaldesignstudio/rampart) for English.
+  - Two NER models find names, companies and places: [KB-BERT](https://huggingface.co/KBLab/bert-base-swedish-cased-ner) from the National Library of Sweden for Swedish, and [Rampart](https://github.com/nationaldesignstudio/rampart) for English. See [The models and why](#the-models-and-why).
   - Checksum-validated rules catch structured identifiers: personnummer, samordningsnummer, orgnr, IBAN, bankgiro, plusgiro, VAT, card numbers, phone numbers, emails, license plates, case numbers.
   - Further rules handle the edge cases the models miss.
 - **Local and offline.** Both models run on CPU via ONNX (~140 MB in total). Nothing is sent anywhere at runtime.
 
-### Quick start
+## The models and why
+
+No single model does the job well. Swedish and English need different models, and structured identifiers like personnummer are better handled by exact rules than by any model. So detection is layered: each layer covers what the others are weak at.
+
+### KB-BERT — Swedish names, companies and places
+
+**[`KBLab/bert-base-swedish-cased-ner`](https://huggingface.co/KBLab/bert-base-swedish-cased-ner)** · base model [`KBLab/bert-base-swedish-cased`](https://huggingface.co/KBLab/bert-base-swedish-cased) · [GitHub](https://github.com/Kungbib/swedish-bert-models) · [paper](https://arxiv.org/abs/2007.01658) · MIT (base CC0)
+
+A BERT model trained by [KBLab](https://kb.se/), the data lab at the National Library of Sweden, on about 3 billion words of Swedish text. It's fine-tuned for named entities on the [SUC 3.0](https://spraakbanken.gu.se/en/resources/suc3) corpus (F1 0.92).
+
+**Why:** it's the strongest openly licensed Swedish NER model, and it was trained on real Swedish: newspapers, government documents, books. Its vocabulary is cased and keeps å/ä/ö, so `Åkesson`, `Anna-Karin` or `Västerås` stay intact. Results on the held-out set:
+- Swedish names, companies and places fully replaced: 90% with spaCy → **100%** with KB-BERT.
+- It also catches what spaCy missed: ALL-CAPS names (via a title-case trick), bare surnames ("*Ek noterade …*") and genitives (`Per Åkessons`).
+
+**How it's used:** `pseudo-maker fetch-models` exports it once to int8 ONNX (125 MB, 98.6% token agreement with the original). It runs on every paragraph.
+
+### Rampart — English and other Latin-script PII
+
+**[`nationaldesignstudio/rampart`](https://github.com/nationaldesignstudio/rampart)** · [model card](https://huggingface.co/nationaldesignstudio/rampart) · base model [`MiniLM-L6-H384`](https://huggingface.co/nreimers/MiniLM-L6-H384-uncased) · trained on [OpenPII 1.5M](https://huggingface.co/datasets/ai4privacy/pii-masking-openpii-1.5m) · CC BY 4.0
+
+A small (15 MB) PII detector from National Design Studio. It's trained on 1.5 million examples in seven languages: English, Spanish, French, German, Italian, Portuguese and Dutch. It labels given names, surnames, street names, building numbers, cities, phone numbers and ID numbers.
+
+**Why:** Swedish documents often contain English: CVs, references, international contacts. Both Swedish models (spaCy and KB-BERT) are weak on English names and addresses. Rampart raised English recall from 68% to **91%** on the held-out set, at about 40 ms per paragraph.
+
+**Caveats:** it lowercases text, strips accents and has no company label. So it only runs on paragraphs that look English, and its name hits must be capitalised in the original.
+
+### spaCy `sv_core_news_lg` — optional fallback
+
+**[`sv_core_news_lg`](https://spacy.io/models/sv#sv_core_news_lg)** · [Hugging Face](https://huggingface.co/spacy/sv_core_news_lg) · CC BY-SA 4.0
+
+The model the original pseudo-maker used. Here it's optional (550 MB):
+- It replaces KB-BERT when the KB model isn't installed.
+- When installed, it also reads English paragraphs, where it catches company names Rampart has no label for. This adds about 6 points of English recall.
+
+### Rules — the hard-coded fallback
+
+Models are statistical and can miss things; some identifiers must never be missed. The rules layer always runs, and checksum-validated matches always win over model output:
+
+- **Checksum and format rules:** personnummer, samordningsnummer, orgnr, IBAN, bankgiro, plusgiro, VAT, card numbers, phones, emails, plates, case numbers.
+- **Patterns:** `AB`/`HB`/`Ltd`/`GmbH` company names, streets with house numbers, lists of well-known Swedish and international companies and places.
+- **Filters** shared by every model: countries, public agencies, products like Teams/Excel, titles, weekdays and job titles are left alone.
+- **Post-passes:** a name found once is found everywhere, plus genitive and alias linking.
+
+### Fakes — not a model
+
+Replacements come from [Faker's `sv_SE` locale](https://faker.readthedocs.io/en/master/locales/sv_SE.html) plus custom generators. The custom ones produce checksum-valid personnummer, orgnr, IBAN and bankgiro, and names that keep gender and shape.
+
+All models run locally on CPU via [ONNX Runtime](https://onnxruntime.ai/). No PyTorch is needed at runtime, and nothing is sent anywhere. Attribution is in [`NOTICE`](NOTICE).
+
+## Quick start
 
 ```sh
 git clone https://github.com/121Development/pseudo-maker-ml && cd pseudo-maker-ml
@@ -43,7 +94,7 @@ pseudo-maker serve                                                  # opens http
 
 Docker and a single-file binary are described under [Getting started](#getting-started).
 
-### How it differs from pseudo-maker
+## How it differs from pseudo-maker
 
 [pseudo-maker](https://github.com/121Development/pseudo-maker) uses spaCy's Swedish model plus rules. This ML variant puts KB-BERT and Rampart in front and keeps spaCy only as an optional fallback. On a held-out test set, the share of names, companies and places fully replaced goes from 83% to 95.5% (Swedish 90% → 100%, English 74% → 91%). The cost is slower detection, about 70 ms per paragraph on CPU. Details are under [Evaluation](#detection-models-first-rules-as-fallback).
 
