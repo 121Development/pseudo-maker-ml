@@ -386,4 +386,14 @@ Round-trip tests verify that `clean → restore` produces byte-identical output 
 
 ## License
 
-Your choice — add a `LICENSE` file. No license declared yet.
+The code is released under the [MIT License](LICENSE). You're free to use, copy, modify and distribute it, including commercially. Just keep the copyright notice.
+
+The NER models are not part of this repository. `pseudo-maker fetch-models` downloads them, and each keeps its own license (see [`NOTICE`](NOTICE)):
+
+| Model | License | What it requires |
+|---|---|---|
+| [KB-BERT](https://huggingface.co/KBLab/bert-base-swedish-cased-ner) | MIT (base model CC0) | Keep the copyright notice |
+| [Rampart](https://github.com/nationaldesignstudio/rampart) | CC BY 4.0 | Credit National Design Studio if you redistribute it, e.g. in a Docker image or binary |
+| [spaCy `sv_core_news_lg`](https://spacy.io/models/sv#sv_core_news_lg) (optional) | CC BY-SA 4.0 | Credit, and share changes to the model itself under the same license |
+
+The Docker image and PyInstaller binary bundle the models, so ship the `NOTICE` file with them. The Dockerfile already copies it into the image.
