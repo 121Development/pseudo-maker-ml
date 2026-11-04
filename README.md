@@ -221,9 +221,24 @@ pseudo-maker serve             # start the web UI
 
 Start the server (any of the three options above) and open `http://127.0.0.1:8765`.
 
-**Clean tab** — drag in a `.docx` / `.txt` / `.md` file. The tool detects entities and shows a preview table. For each row you can:
-- Untick **Replace** to leave the original in place.
-- Click the **Will become** cell to edit the fake manually (useful if the auto-pick collides with the real surname, or if the format needs tweaking). Client-side validation warns on empty / duplicate / invalid-Luhn entries but still accepts your value.
+**Clean tab** — drag in a `.docx` / `.txt` / `.md` file. The tool detects entities and shows a preview with two views (switch at the top right):
+
+- **Table**: one row per entity.
+  - Untick **Replace** to leave the original in place.
+  - Click the **Will become** cell to edit the fake. Client-side validation warns on empty, duplicate or invalid-checksum values but still accepts yours.
+  - Rows flagged *uncertain* had low model confidence. Rows flagged *added* are ones you added.
+- **Document**: the whole text, with every substitution highlighted.
+  - Click a highlight to change its fake or keep the original. Short forms such as genitives (`Annas`) follow the edit automatically.
+  - **Show originals** switches the highlights between fake and real text.
+  - Dotted words are *possibly sensitive*; click one to add it.
+  - Select any text to add it as a term.
+
+Below both views:
+- **Possibly sensitive, not replaced**: findings that are kept by default, each with the reason and an **Add** button. They include:
+  - model hits below the confidence threshold
+  - countries, public agencies and products the rules keep on purpose
+  - capitalised words that are known Swedish names but weren't detected
+- **Add a term**: type anything you know is sensitive (a project name, nickname or customer number), pick a type, and every occurrence is replaced. Matching is whole-word and case-insensitive, and includes genitive *-s*. *Other (placeholder)* replaces it with `[Redacted-123]`.
 
 Click **Finalize** and you get two downloads: `<name>_CLEANED.<ext>` and `<name>_MAPPING.json`.
 

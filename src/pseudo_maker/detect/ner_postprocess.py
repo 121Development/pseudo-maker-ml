@@ -165,3 +165,51 @@ def postprocess(
         if entity_type == "LOCATION":
             entity_type = _classify_location(span_text)
     return Span(start=start, end=end, type=entity_type, value=span_text, confidence=confidence, source=source)
+
+
+def note_rejected(
+    rejected: list | None,
+    entity_type: str,
+    text: str,
+    start: int,
+    end: int,
+    score: float,
+    reason: str,
+) -> None:
+    """Record a model span that was not accepted, for the UI's ambiguous list.
+
+    Only plausible entities are kept: they must contain a capital letter, and
+    filtered persons are skipped (those are mostly pronouns, titles, weekdays).
+    """
+    if rejected is None:
+        return
+    from .recognizers.base import Candidate
+
+    while start < end and not text[start].isalnum():
+        start += 1
+    while end > start and not text[end - 1].isalnum():
+        end -= 1
+    value = text[start:end]
+    if len(value) < 2 or not any(c.isupper() for c in value):
+        return
+    if entity_type == "LOCATION":
+        entity_type = _classify_location(value)
+    rejected.append(Candidate(start, end, entity_type, value, round(float(score), 3), reason))
+
+
+# Model spans scoring between this and the recognizer's threshold are shown
+# as ambiguous instead of being dropped silently.
+REJECT_FLOOR = 0.2
+
+
+def filter_reason(entity_type: str, value: str) -> str:
+    """Human-readable reason why postprocess() rejected a span."""
+    v = value.strip()
+    if entity_type in ("LOCATION", "CITY", "STREET") and is_country_or_continent(v):
+        return "country (kept by default)"
+    if entity_type == "COMPANY":
+        if is_job_title(v):
+            return "looks like a job title"
+        if is_blocklisted_company(v) or is_blocklisted_person(v):
+            return "product, platform or public agency (kept by default)"
+    return "filtered by rules"

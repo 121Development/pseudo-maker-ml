@@ -93,6 +93,13 @@ def _rm_rf(path: Path) -> None:
     path.rmdir()
 
 
+# Types a user can pick when adding a term by hand. CUSTOM → opaque placeholder.
+ADDABLE_TYPES = {
+    "PERSON", "COMPANY", "CITY", "STREET", "EMAIL", "PHONE", "ID_NUMBER",
+    "PERSONNUMMER", "ORGNR", "DATE", "CASE_NUMBER", "CUSTOM",
+}
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="pseudo-maker", docs_url=None, redoc_url=None)
     store = SessionStore()
@@ -131,7 +138,7 @@ def create_app() -> FastAPI:
         input_path = work / (file.filename or f"input{ext}")
         await _save_upload(file, input_path)
 
-        session, entities = await asyncio.to_thread(orchestrate.preview, input_path)
+        session, _entities = await asyncio.to_thread(orchestrate.preview, input_path)
         store.put_data(sid, "session", session)
         store.put_data(sid, "original_stem", _stem(file.filename or "input"))
         store.put_data(sid, "original_ext", ext)
@@ -139,8 +146,49 @@ def create_app() -> FastAPI:
         return JSONResponse({
             "session_id": sid,
             "filename": file.filename,
-            "entities": [e.as_dict() for e in entities],
+            **_preview_state(session),
         })
+
+    def _preview_state(session: orchestrate.CleanSession) -> dict:
+        return {
+            "entities": [e.as_dict() for e in orchestrate.entities(session)],
+            "candidates": orchestrate.candidates(session),
+            "document": orchestrate.document_view(session),
+        }
+
+    @app.post("/api/clean/add-term")
+    async def add_term(
+        session_id: str = Form(...),
+        term: str = Form(...),
+        type: str = Form("PERSON"),
+    ):
+        """Replace every occurrence of a user-supplied term (or an accepted candidate)."""
+        s = store.get(session_id)
+        session: orchestrate.CleanSession = s["data"]["session"]
+        if type.upper() not in ADDABLE_TYPES:
+            raise HTTPException(status_code=400, detail=f"Unsupported type: {type}")
+        try:
+            added = await asyncio.to_thread(orchestrate.add_term, session, term, type)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return JSONResponse({"added": added, **_preview_state(session)})
+
+    @app.post("/api/clean/set-fake")
+    async def set_fake(
+        session_id: str = Form(...),
+        entity_id: str = Form(...),
+        fake: str = Form(...),
+    ):
+        """Change an entity's fake now, so the document view shows it everywhere."""
+        s = store.get(session_id)
+        session: orchestrate.CleanSession = s["data"]["session"]
+        try:
+            orchestrate.set_fake(session, entity_id, fake)
+        except KeyError:
+            raise HTTPException(status_code=400, detail=f"Unknown entity id: {entity_id}")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return JSONResponse(_preview_state(session))
 
     @app.post("/api/clean/finalize")
     async def finalize(
@@ -188,7 +236,7 @@ def create_app() -> FastAPI:
             "mapping_url": f"/api/download/{session_id}/mapping",
             "cleaned_name": cleaned_name,
             "mapping_name": mapping_name,
-            "kept_entity_count": len(session.mapper.all_entries()) - len(excluded),
+            "kept_entity_count": len([e for e in orchestrate.entities(session) if e.id not in excluded]),
         })
 
     @app.get("/api/download/{session_id}/{kind}")

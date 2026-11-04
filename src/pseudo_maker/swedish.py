@@ -77,6 +77,14 @@ def name_gender(first: str) -> str | None:
     return None
 
 
+def _title_word(word: str) -> str:
+    """'[REDACTED' → '[Redacted', 'KARLSSON' → 'Karlsson' (first letter kept upper)."""
+    for i, c in enumerate(word):
+        if c.isalpha():
+            return word[:i + 1] + word[i + 1:].lower()
+    return word
+
+
 def match_case(template: str, value: str) -> str:
     """Render `value` in the same casing style as `template` (UPPER / lower / as-is)."""
     letters = [c for c in template if c.isalpha()]
@@ -87,7 +95,7 @@ def match_case(template: str, value: str) -> str:
     v_letters = [c for c in value if c.isalpha()]
     if len(v_letters) > 1 and all(c.isupper() for c in v_letters):
         # Fake was generated for an ALL-CAPS original; render in Title Case here.
-        return re.sub(r"[^\s\-]+", lambda m: m.group(0)[0] + m.group(0)[1:].lower(), value)
+        return re.sub(r"[^\s\-]+", lambda m: _title_word(m.group(0)), value)
     return value
 
 

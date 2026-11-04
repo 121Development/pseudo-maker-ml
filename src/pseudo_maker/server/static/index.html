@@ -3,13 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Pseudo Maker</title>
+  <title>Pseudo Maker ML</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%237ec4ff'/></svg>" />
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
   <header>
-    <h1>Pseudo Maker</h1>
-    <p class="tagline">Anonymize Swedish PII. Share with public LLMs. Restore on return.</p>
+    <h1>Pseudo Maker <span class="muted">ML</span></h1>
+    <p class="tagline">Anonymize Swedish and English PII. Share with public LLMs. Restore on return.</p>
   </header>
 
   <nav class="tabs">
@@ -36,26 +37,66 @@
       </div>
 
       <div id="clean-preview" class="stage">
-        <h2>Detected entities <span id="entity-count" class="muted"></span></h2>
-        <p class="hint">Uncheck anything you want kept as-is. Unchecked entities will <strong>not</strong> be replaced.</p>
-        <div class="bulk-controls">
-          <button class="link-btn" id="select-all">Select all</button>
-          <button class="link-btn" id="select-none">Deselect all</button>
+        <div class="preview-head">
+          <h2>Detected entities <span id="entity-count" class="muted"></span></h2>
+          <div class="view-switch" role="tablist">
+            <button class="view-btn active" data-view="table">Table</button>
+            <button class="view-btn" data-view="document">Document</button>
+          </div>
         </div>
-        <div class="table-wrap">
-          <table id="entity-table">
-            <thead>
-              <tr>
-                <th class="col-check">Replace</th>
-                <th>Type</th>
-                <th>Original</th>
-                <th>Will become <span class="muted">(click to edit)</span></th>
-                <th class="col-count">Count</th>
-              </tr>
-            </thead>
-            <tbody id="entity-body"></tbody>
-          </table>
+
+        <!-- Table view -->
+        <div id="view-table" class="view active">
+          <p class="hint">Uncheck anything you want kept as-is. Unchecked entities will <strong>not</strong> be replaced.</p>
+          <div class="bulk-controls">
+            <button class="link-btn" id="select-all">Select all</button>
+            <button class="link-btn" id="select-none">Deselect all</button>
+          </div>
+          <div class="table-wrap">
+            <table id="entity-table">
+              <thead>
+                <tr>
+                  <th class="col-check">Replace</th>
+                  <th>Type</th>
+                  <th>Original</th>
+                  <th>Will become <span class="muted">(click to edit)</span></th>
+                  <th class="col-count">Count</th>
+                </tr>
+              </thead>
+              <tbody id="entity-body"></tbody>
+            </table>
+          </div>
         </div>
+
+        <!-- Document view -->
+        <div id="view-document" class="view">
+          <div class="doc-toolbar">
+            <span class="legend"><mark class="sub">replaced</mark> <mark class="sub excluded">kept</mark> <span class="cand">possibly sensitive</span></span>
+            <label class="toggle"><input type="checkbox" id="show-originals" /> Show originals</label>
+          </div>
+          <p class="hint">Click a highlight to change its replacement or keep the original. Click a dotted word to add it, or select any text to add it as a term.</p>
+          <div id="doc-view" class="doc-view"></div>
+        </div>
+
+        <!-- Ambiguous findings -->
+        <details id="ambiguous" class="side-section" open>
+          <summary>Possibly sensitive, not replaced <span id="ambiguous-count" class="muted"></span></summary>
+          <p class="hint">The models were unsure about these, or the rules keep them by default (countries, agencies, products). Add the ones you want replaced.</p>
+          <ul id="ambiguous-list" class="ambiguous-list"></ul>
+        </details>
+
+        <!-- Custom term -->
+        <div class="side-section add-term">
+          <h3>Add a term</h3>
+          <p class="hint">Know something sensitive that wasn't found, like a project name, nickname or customer number? Every occurrence will be replaced.</p>
+          <form id="add-term-form" class="add-term-row" autocomplete="off">
+            <input type="text" id="add-term-input" placeholder="e.g. Projekt Blåval" spellcheck="false" />
+            <select id="add-term-type" class="type-select"></select>
+            <button type="submit" class="primary small">Add</button>
+          </form>
+          <p id="add-term-msg" class="add-term-msg" hidden></p>
+        </div>
+
         <div class="actions">
           <button id="finalize-btn" class="primary">Finalize and prepare downloads</button>
           <button id="cancel-btn" class="secondary">Start over</button>
@@ -127,6 +168,8 @@
       </div>
     </section>
   </main>
+
+  <div id="popover" class="popover" hidden></div>
 
   <footer>
     <p>Running locally on 127.0.0.1 — your files never leave this machine.</p>

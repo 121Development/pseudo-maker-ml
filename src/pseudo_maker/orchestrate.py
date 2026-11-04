@@ -16,8 +16,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .detect.pipeline import DetectionPipeline, propagate_person_names
-from .detect.recognizers.base import Span
+import re
+
+from .detect.pipeline import DetectionPipeline, filter_candidates, propagate_person_names
+from .detect.recognizers.base import Candidate, Span
 from .io import docx_io, text_io
 from .mapping.store import read_mapping, write_mapping
 from .restore.restore import RestoreReport, restore as restore_text
@@ -39,6 +41,8 @@ class PreviewEntity:
     fake: str
     occurrences: int
     aliases: list[str]
+    confidence: float = 1.0          # lowest confidence among its spans
+    sources: list[str] = field(default_factory=list)  # regex / pattern / ner / manual
 
     def as_dict(self) -> dict:
         return {
@@ -48,7 +52,14 @@ class PreviewEntity:
             "fake": self.fake,
             "occurrences": self.occurrences,
             "aliases": self.aliases,
+            "confidence": round(self.confidence, 3),
+            "sources": self.sources,
+            "uncertain": self.confidence < UNCERTAIN_BELOW,
         }
+
+
+# Entities whose weakest span scores below this are flagged "uncertain" in the UI.
+UNCERTAIN_BELOW = 0.7
 
 
 @dataclass
@@ -61,6 +72,14 @@ class CleanSession:
     mapped_per_handle: list[list[MappedSpan]] = field(default_factory=list)
     text: str = ""                                   # full text (when kind=="text")
     mapped_spans: list[MappedSpan] = field(default_factory=list)
+    candidates: list[list[Candidate]] = field(default_factory=list)  # per text, not replaced
+
+    def texts(self) -> list[str]:
+        return [h.full_text for h in self.handles] if self.kind == "docx" else [self.text]
+
+    def mapped_lists(self) -> list[list[MappedSpan]]:
+        """Mutable per-text span lists (the text kind has a single one)."""
+        return self.mapped_per_handle if self.kind == "docx" else [self.mapped_spans]
 
 
 def _is_docx(path: Path) -> bool:
@@ -71,18 +90,124 @@ def is_docx_path(path: Path) -> bool:
     return _is_docx(path)
 
 
-def _collect_preview_entities(mapper: Mapper) -> list[PreviewEntity]:
+def _collect_preview_entities(session: "CleanSession") -> list[PreviewEntity]:
+    """Entities with at least one span, with occurrence counts from the spans."""
+    counts: dict[str, int] = {}
+    conf: dict[str, float] = {}
+    sources: dict[str, set[str]] = {}
+    for mapped in session.mapped_lists():
+        for m in mapped:
+            counts[m.entity_id] = counts.get(m.entity_id, 0) + 1
+            conf[m.entity_id] = min(conf.get(m.entity_id, 1.0), m.span.confidence)
+            sources.setdefault(m.entity_id, set()).add(m.span.source)
     return [
         PreviewEntity(
             id=e.id,
             type=e.type,
             original=e.original,
             fake=e.fake,
-            occurrences=e.occurrences,
+            occurrences=counts[e.id],
             aliases=sorted(e.aliases),
+            confidence=conf[e.id],
+            sources=sorted(sources[e.id]),
         )
-        for e in mapper.all_entries()
+        for e in session.mapper.all_entries()
+        if counts.get(e.id)
     ]
+
+
+def entities(session: "CleanSession") -> list[PreviewEntity]:
+    return _collect_preview_entities(session)
+
+
+def candidates(session: "CleanSession") -> list[dict]:
+    """Ambiguous findings not replaced by default, grouped by (type, value)."""
+    groups: dict[tuple[str, str], dict] = {}
+    for cands in session.candidates:
+        for c in cands:
+            key = (c.type, c.value.lower())
+            g = groups.get(key)
+            if g is None:
+                groups[key] = {"type": c.type, "value": c.value, "score": c.score,
+                               "reason": c.reason, "occurrences": 1}
+            else:
+                g["occurrences"] += 1
+                g["score"] = max(g["score"], c.score)
+    out = sorted(groups.values(), key=lambda g: (-g["score"], g["value"].lower()))
+    for i, g in enumerate(out, 1):
+        g["id"] = f"cand_{i:03d}"
+    return out
+
+
+def document_view(session: "CleanSession") -> list[dict]:
+    """The document as paragraphs with substitution and candidate offsets."""
+    mapper = session.mapper
+    out = []
+    for text, mapped, cands in zip(session.texts(), session.mapped_lists(), session.candidates):
+        spans = []
+        for m in sorted(mapped, key=lambda m: m.span.start):
+            entry = mapper.get_entry(m.entity_id)
+            spans.append({
+                "start": m.span.start, "end": m.span.end, "entity_id": m.entity_id,
+                "fake": mapper.fake_for_alias(entry, m.span.value),
+            })
+        out.append({
+            "text": text,
+            "spans": spans,
+            "candidates": [{"start": c.start, "end": c.end, "type": c.type, "value": c.value}
+                           for c in sorted(cands, key=lambda c: c.start)],
+        })
+    return out
+
+
+def set_fake(session: "CleanSession", entity_id: str, new_fake: str) -> None:
+    session.mapper.override_fake(entity_id, new_fake)
+
+
+def add_term(session: "CleanSession", term: str, entity_type: str) -> int:
+    """Replace every occurrence of a user-supplied term. Returns occurrences added.
+
+    Matching is whole-word and case-insensitive; for word-like types a
+    trailing genitive -s is included ("Annas"). An occurrence inside an
+    existing substitution is skipped; one that fully covers existing
+    substitutions replaces them ("Volvo" → user adds "Volvo Personvagnar AB").
+    """
+    term = " ".join(term.split())
+    if not term:
+        raise ValueError("term must not be empty")
+    entity_type = entity_type.upper()
+    genitive = r"s?" if entity_type in ("PERSON", "COMPANY", "CITY", "STREET") and term[-1].isalpha() else ""
+    pattern = re.compile(
+        r"(?<![\w])" + r"\s+".join(re.escape(w) for w in term.split()) + genitive + r"(?![\w])",
+        re.IGNORECASE,
+    )
+    found: list[tuple[int, int, int, str]] = []  # (text index, start, end, value)
+    for ti, (text, mapped) in enumerate(zip(session.texts(), session.mapped_lists())):
+        for mt in pattern.finditer(text):
+            a, b = mt.start(), mt.end()
+            overlapping = [m for m in mapped if a < m.span.end and m.span.start < b]
+            if any(not (a <= m.span.start and m.span.end <= b) or (m.span.start, m.span.end) == (a, b)
+                   for m in overlapping):
+                continue  # already replaced, inside or partly overlapping a substitution
+            found.append((ti, a, b, mt.group(0)))
+    if not found:
+        return 0
+
+    mapper = session.mapper
+    mapper.reserve(v for *_, v in found)
+    # Base forms before genitives so "Annas" links to "Anna".
+    found.sort(key=lambda f: (f[3].lower().endswith("s") and len(f[3]) > len(term), f[0], f[1]))
+    lists = session.mapped_lists()
+    for ti, a, b, value in found:
+        mapped = lists[ti]
+        mapped[:] = [m for m in mapped if not (a <= m.span.start and m.span.end <= b)]
+        entry = mapper.map(entity_type, value)
+        span = Span(a, b, entity_type, value, 1.0, "manual")
+        mapped.append(MappedSpan(span=span, entity_id=entry.id, fake=mapper.fake_for_alias(entry, value)))
+        session.candidates[ti] = [c for c in session.candidates[ti] if not (c.start < b and a < c.end)]
+    for mapped in lists:
+        mapped.sort(key=lambda m: m.span.start)
+    return len(found)
 
 
 def make_pipeline(*, use_ner: bool = True, ner: str | None = None, english_ner: str | None = None) -> DetectionPipeline:
@@ -132,10 +257,11 @@ def preview_docx(
     mapper = Mapper(seed=seed)
     doc, handles = docx_io.load(input_path)
 
-    spans_per_handle = [
-        pipeline.detect(h.full_text) if h.full_text.strip() else [] for h in handles
+    detected = [
+        pipeline.detect_with_candidates(h.full_text) if h.full_text.strip() else ([], []) for h in handles
     ]
-    spans_per_handle = propagate_person_names([h.full_text for h in handles], spans_per_handle)
+    spans_per_handle = propagate_person_names([h.full_text for h in handles], [d[0] for d in detected])
+    cands = [filter_candidates(sp, d[1]) for sp, d in zip(spans_per_handle, detected)]
     flat = [s for spans in spans_per_handle for s in spans]
     flat_mapped = _map_spans(mapper, flat)
     mapped_per_handle: list[list[MappedSpan]] = []
@@ -151,8 +277,9 @@ def preview_docx(
         doc=doc,
         handles=handles,
         mapped_per_handle=mapped_per_handle,
+        candidates=cands,
     )
-    return session, _collect_preview_entities(mapper)
+    return session, _collect_preview_entities(session)
 
 
 def preview_text(
@@ -167,7 +294,8 @@ def preview_text(
     mapper = Mapper(seed=seed)
     text = text_io.read_text(input_path)
 
-    spans = propagate_person_names([text], [pipeline.detect(text)])[0]
+    found, raw_cands = pipeline.detect_with_candidates(text)
+    spans = propagate_person_names([text], [found])[0]
     mapped_spans = _map_spans(mapper, spans)
 
     session = CleanSession(
@@ -176,8 +304,9 @@ def preview_text(
         mapper=mapper,
         text=text,
         mapped_spans=mapped_spans,
+        candidates=[filter_candidates(spans, raw_cands)],
     )
-    return session, _collect_preview_entities(mapper)
+    return session, _collect_preview_entities(session)
 
 
 def finalize(
@@ -213,7 +342,8 @@ def finalize(
         new_text = text_io.apply_replacements(session.text, repls)
         text_io.write_text(output_path, new_text)
 
-    kept = [e for e in session.mapper.all_entries() if e.id not in excluded]
+    used = {m.entity_id for mapped in session.mapped_lists() for m in mapped}
+    kept = [e for e in session.mapper.all_entries() if e.id in used and e.id not in excluded]
     write_mapping(mapping_path, kept, source_file=session.input_path.name)
 
 

@@ -12,7 +12,14 @@ from typing import Iterable
 from .. import models
 from .. import swedish as sv
 from .models.onnx_tagger import WordPrediction, load_tagger
-from .ner_postprocess import _titlecase_caps, postprocess, split_conjunctions
+from .ner_postprocess import (
+    REJECT_FLOOR,
+    _titlecase_caps,
+    filter_reason,
+    note_rejected,
+    postprocess,
+    split_conjunctions,
+)
 from .recognizers.base import Span
 
 _LEGAL_OR_PUBLIC = re.compile(
@@ -71,19 +78,24 @@ class KbSwedishNerRecognizer:
         self._model_dir = str(d)
         self.min_score = min_score
 
-    def find(self, text: str) -> Iterable[Span]:
+    def find(self, text: str, rejected: list | None = None) -> Iterable[Span]:
+        """Yield accepted spans; append near-misses to `rejected` if given."""
         tagger = load_tagger(self._model_dir)
         # KB-BERT is cased: ALL-CAPS names ("MOHAMMED AL-HASSAN") look like
         # acronyms to it. Title-case them first (same length → same offsets).
         words = tagger.tag(_titlecase_caps(text))
         for start, end, label, score in group_io(text, words):
-            if score < self.min_score:
-                continue
             mapped = _map_label(label, text[start:end])
             if mapped is None:
+                continue
+            if score < self.min_score:
+                if score >= REJECT_FLOOR:
+                    note_rejected(rejected, mapped, text, start, end, score, "low model confidence")
                 continue
             pieces = split_conjunctions(text, start, end) if mapped == "PERSON" else [(start, end)]
             for a, b in pieces:
                 span = postprocess(mapped, text, a, b, confidence=round(score, 3))
                 if span is not None:
                     yield span
+                elif mapped != "PERSON":
+                    note_rejected(rejected, mapped, text, a, b, score, filter_reason(mapped, text[a:b]))

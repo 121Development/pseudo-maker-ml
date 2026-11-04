@@ -17,7 +17,7 @@ from typing import Literal, Sequence
 from .. import models
 from .. import swedish as sv
 from .recognizers.bankgiro_plusgiro import BankgiroRecognizer, PlusgiroRecognizer
-from .recognizers.base import Span
+from .recognizers.base import Candidate, Span
 from .recognizers.company_street_se import (
     CompanySeRecognizer,
     KnownCompanySeRecognizer,
@@ -148,18 +148,62 @@ class DetectionPipeline:
             self.english_assist = _make_spacy_assist(ner_model)
 
     def detect(self, text: str) -> list[Span]:
+        return self.detect_with_candidates(text)[0]
+
+    def detect_with_candidates(self, text: str) -> tuple[list[Span], list[Candidate]]:
+        """Accepted spans, plus ambiguous candidates that were *not* accepted.
+
+        Candidates are model near-misses (low score, or dropped by a filter)
+        and capitalised words that are known names but weren't detected. They
+        are not filtered against the spans here; see `filter_candidates`.
+        """
         spans: list[Span] = []
+        rejected: list[Candidate] = []
         for r in self.regex_recognizers:
             spans.extend(r.find(text))
         if self.ner is not None:
-            spans.extend(self.ner.find(text))
+            spans.extend(self.ner.find(text, rejected))
         english = self.english_mode == "on" or sv.looks_english(text)
         if self.english_ner is not None and english:
-            spans.extend(self.english_ner.find(text))
+            spans.extend(self.english_ner.find(text, rejected))
         if self.english_assist is not None and english:
-            spans.extend(self.english_assist.find(text))
+            spans.extend(self.english_assist.find(text, rejected))
         spans = [_extend_street_number(text, s) for s in spans]
-        return _resolve_overlaps(spans)
+        spans = _resolve_overlaps(spans)
+        rejected.extend(_known_name_candidates(text))
+        return spans, rejected
+
+
+_CAP_WORD = re.compile(r"(?<![\w-])[A-ZÅÄÖ][a-zåäöéü]{2,}(?:-[A-ZÅÄÖ][a-zåäöéü]+)?(?![\w-])")
+_SENTENCE_START = re.compile(r"(?:^|[.!?:;•\-–—\n\t(\"]|\d)\s*$")
+
+
+def _known_name_candidates(text: str) -> list[Candidate]:
+    """Capitalised mid-sentence words that are known Swedish first names/surnames."""
+    from .blocklist import is_blocklisted_person, is_country_or_continent
+
+    out = []
+    for m in _CAP_WORD.finditer(text):
+        word = m.group(0)
+        if _SENTENCE_START.search(text[max(0, m.start() - 3):m.start()]) or m.start() == 0:
+            continue
+        if not sv.is_known_name(word) or is_blocklisted_person(word) or is_country_or_continent(word):
+            continue
+        out.append(Candidate(m.start(), m.end(), "PERSON", word, 0.5, "known first name or surname"))
+    return out
+
+
+def filter_candidates(spans: Sequence[Span], candidates: Sequence[Candidate]) -> list[Candidate]:
+    """Drop candidates that overlap an accepted span; among overlapping
+    candidates keep the highest-scoring one."""
+    kept: list[Candidate] = []
+    for c in sorted(candidates, key=lambda c: (-c.score, c.start)):
+        if any(c.start < s.end and s.start < c.end for s in spans):
+            continue
+        if any(c.start < k.end and k.start < c.end for k in kept):
+            continue
+        kept.append(c)
+    return sorted(kept, key=lambda c: c.start)
 
 
 _HOUSE_NUMBER = re.compile(r"[ \t]+\d{1,4}(?:[A-Za-z]|[ \t][A-Z])?(?![\wåäö])")

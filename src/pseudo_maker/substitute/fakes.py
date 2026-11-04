@@ -403,6 +403,9 @@ GENERATORS = {
     "PASSPORT": fake_passport,
     "CASE_NUMBER": fake_case_number,
     "ID_NUMBER": fake_id_number,
+    # Mixed case on purpose: an ALL-CAPS occurrence then gets "[REDACTED-123]",
+    # which restore can tell apart.
+    "CUSTOM": lambda original, rng: sv.match_case(original, f"[Redacted-{rng.randint(100, 999)}]"),
     "DATE": fake_date,
     "AGE": fake_age,
 }

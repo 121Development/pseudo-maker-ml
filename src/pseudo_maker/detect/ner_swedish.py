@@ -25,6 +25,8 @@ from .ner_postprocess import (  # noqa: F401  (re-exported for tests/back-compat
     _should_reject_person,
     _strip_leading_noise,
     _titlecase_caps,
+    filter_reason,
+    note_rejected,
     postprocess,
 )
 from .recognizers.base import Span
@@ -56,7 +58,7 @@ class SwedishNerRecognizer:
             self._nlp = _load_model(self._model_name)
         return self._nlp
 
-    def find(self, text: str) -> Iterable[Span]:
+    def find(self, text: str, rejected: list | None = None) -> Iterable[Span]:
         nlp = self._ensure()
         # spaCy misses names written in capitals ("MOHAMMED AL-HASSAN"), common
         # in Swedish headings and forms. Title-case all-caps words before NER;
@@ -70,3 +72,6 @@ class SwedishNerRecognizer:
             span = postprocess(mapped, text, ent.start_char, ent.end_char, confidence=0.85)
             if span is not None:
                 yield span
+            elif mapped != "PERSON":
+                note_rejected(rejected, mapped, text, ent.start_char, ent.end_char, 0.85,
+                              filter_reason(mapped, text[ent.start_char:ent.end_char]))

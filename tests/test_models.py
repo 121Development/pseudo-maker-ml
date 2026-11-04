@@ -116,7 +116,7 @@ def test_pipeline_runs_rampart_only_on_english(monkeypatch):
     p = DetectionPipeline(ner="kb", english_ner="auto")
     calls: list[str] = []
     real = p.english_ner.find
-    monkeypatch.setattr(p.english_ner, "find", lambda t: calls.append(t) or real(t))
+    monkeypatch.setattr(p.english_ner, "find", lambda t, *a: calls.append(t) or real(t, *a))
     p.detect("Anna arbetar på Volvo och bor i Malmö.")
     assert calls == []
     p.detect("Please call John Miller at the office.")

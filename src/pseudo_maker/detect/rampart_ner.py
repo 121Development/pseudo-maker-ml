@@ -13,7 +13,7 @@ from typing import Iterable
 from .. import models
 from .. import swedish as sv
 from .models.onnx_tagger import WordPrediction, load_tagger
-from .ner_postprocess import postprocess, split_conjunctions
+from .ner_postprocess import REJECT_FLOOR, filter_reason, note_rejected, postprocess, split_conjunctions
 from .recognizers.base import Span
 
 # Rampart type → (group key, pseudo-maker type). Types in the same group that
@@ -82,21 +82,27 @@ class RampartRecognizer:
         self._model_dir = str(d)
         self.min_score = min_score
 
-    def find(self, text: str) -> Iterable[Span]:
+    def find(self, text: str, rejected: list | None = None) -> Iterable[Span]:
+        """Yield accepted spans; append near-misses to `rejected` if given."""
         tagger = load_tagger(self._model_dir)
         for start, end, ptype, score in decode_bio(text, tagger.tag(text)):
-            if score < self.min_score:
-                continue
             value = text[start:end]
+            if score < self.min_score:
+                if score >= REJECT_FLOOR and ptype in ("PERSON", "CITY", "STREET", "ID_NUMBER"):
+                    note_rejected(rejected, ptype, text, start, end, score, "low model confidence")
+                continue
             # Uncased model: require a capital letter for names and places.
             if ptype in ("PERSON", "CITY", "STREET") and not any(c.isupper() for c in value):
                 continue
             # A lone capitalised word (table header, heading) needs either a
             # confident prediction or to be a known name.
             if ptype == "PERSON" and " " not in value.strip() and score < 0.8 and not sv.is_known_name(value):
+                note_rejected(rejected, ptype, text, start, end, score, "single word, low confidence")
                 continue
             pieces = split_conjunctions(text, start, end) if ptype == "PERSON" else [(start, end)]
             for a, b in pieces:
                 span = postprocess(ptype, text, a, b, confidence=round(score, 3))
                 if span is not None:
                     yield span
+                elif ptype != "PERSON":
+                    note_rejected(rejected, ptype, text, a, b, score, filter_reason(ptype, text[a:b]))

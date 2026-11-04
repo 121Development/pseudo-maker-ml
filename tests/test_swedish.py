@@ -286,3 +286,13 @@ def test_family_members_share_fake_surname():
     assert son.fake != mother.fake
 
 pytestmark = pytest.mark.usefixtures("ner_backend")
+
+
+def test_unrelated_people_get_different_fake_surnames():
+    m = Mapper(seed=0)
+    fakes_ = [m.map("PERSON", n).fake for n in (
+        "Anna-Karin Lindqvist", "Per Åkesson", "Erik Svensson", "Maria Holm", "Johan Berg",
+        "Sara Nyberg", "Lars Nilsson", "Karin Wallin", "Olle Ek", "Ebba Strand",
+    )]
+    surnames = [f.split()[-1] for f in fakes_]
+    assert len(set(surnames)) == len(surnames), fakes_

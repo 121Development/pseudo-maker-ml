@@ -80,19 +80,30 @@ class Mapper:
                 if len(p) >= 3 and p.isalpha() and p not in self._NOT_RESERVED and p not in sv.NAME_PARTICLES:
                     self._reserved.add(p)
 
-    def _collides(self, candidate: str, original: str) -> bool:
+    def _collides(self, candidate: str, original: str, entity_type: str = "") -> bool:
         if candidate == original or candidate in self._used_fakes:
             return True
         c = candidate.lower()
         if c in self._reserved:
             return True
-        return any(p in self._reserved for p in re.split(r"[\s\-]+", c) if p)
+        if any(p in self._reserved for p in re.split(r"[\s\-]+", c) if p):
+            return True
+        if entity_type == "PERSON" and len(candidate.split()) >= 2:
+            # Unrelated people must not share a fake surname: the LLM would
+            # read "Ann-Marie Johansson" and "Elis Johansson" as family.
+            fake_last = candidate.split()[-1].lower()
+            orig_last = original.split()[-1].lower()
+            for (t, _), e in self._by_key.items():
+                if t == "PERSON" and len(e.fake.split()) >= 2 and e.fake.split()[-1].lower() == fake_last \
+                        and e.original.split()[-1].lower() != orig_last:
+                    return True
+        return False
 
     def _unique_fake(self, entity_type: str, original: str, **hints) -> str:
         for _ in range(50):
             candidate = generate_fake(entity_type, original, self.rng, **hints)
             if entity_type in GENITIVE_TYPES:
-                bad = self._collides(candidate, original)   # word-like: check name parts too
+                bad = self._collides(candidate, original, entity_type)   # word-like: check name parts too
             else:
                 bad = candidate in self._used_fakes or candidate == original
             if not bad:
@@ -158,6 +169,13 @@ class Mapper:
         if key in self._by_key:
             entry = self._by_key[key]
             entry.occurrences += 1
+            if original != entry.original and original not in entry.aliases:
+                # Same value in another casing ("BLÅVAL" vs "Blåval"): give it a
+                # matching-case fake so restore can bring back the exact casing.
+                rendered = self.fake_for_alias(entry, original)
+                if rendered != entry.fake:
+                    entry.aliases.add(original)
+                    entry.fake_aliases[original] = rendered
             return entry
 
         if entity_type in ALIAS_TYPES:
@@ -235,7 +253,7 @@ class Mapper:
         'Annas'                                                → 'Evas'
         """
         if _normalize(alias_text) == _normalize(entry.original):
-            return entry.fake
+            return entry.fake if alias_text == entry.original else sv.match_case(alias_text, entry.fake)
         base = entry.genitive_of.get(alias_text)
         if base is not None:
             return sv.genitive(self.fake_for_alias(entry, base))
