@@ -63,12 +63,57 @@ def is_known_name(name: str) -> bool:
     return is_known_first_name(name) or name.lower() in last
 
 
+# Common English first names, used ONLY to keep gender when faking a name
+# ("Gareth Hughes" → a male Swedish name). They are deliberately not part of
+# is_known_name(): many are ordinary words (Mark, Will, Rose, Grace) and would
+# cause false detections. Unisex names (Alex, Sam, Jordan, Taylor …) are left
+# out, so they keep a random gender.
+_ENGLISH_FEMALE = frozenset("""
+abigail ada alice alison amanda amber amelia amy andrea angela ann anne annie april ashley
+audrey barbara beatrice becky bella beth bethany betty beverly brenda bridget brittany
+carol caroline catherine charlotte chelsea chloe christina christine claire clara courtney
+cynthia daisy deborah debra denise diana diane donna dorothy edith eleanor elizabeth ella
+ellen eloise emily emma erin esther eve evelyn faith fiona florence frances freya georgia
+gillian gloria grace gwen hannah harriet hazel heather helen holly imogen irene isabel
+isabella isla jacqueline jane janet janice jasmine jean jennifer jenny jessica jill joan
+joanna joanne josephine joy joyce judith judy julia julie karen kate katherine kathleen
+kathryn katie kayla kelly kimberly kirsty laura lauren leah lily linda lisa lola lorraine
+louise lucy lydia madeline madison maggie margaret maria marie marilyn martha mary megan
+melanie melissa mia michelle mildred millie molly monica nancy naomi natalie nicola nicole
+olivia pamela patricia paula pauline penelope phoebe poppy priya rachel rebecca rose rosie
+ruby ruth sally samantha sandra sara sarah scarlett sharon shirley sophia sophie stephanie
+susan suzanne tamara teresa theresa tiffany tracy valerie vanessa victoria virginia wendy
+yvonne zoe chloé lucia sofia isabelle nadia fatima aisha
+""".split())
+_ENGLISH_MALE = frozenset("""
+aaron adam adrian aidan alan albert alexander alfie alfred andrew angus anthony archie
+arthur austin barry ben benjamin bernard bill billy bob bobby brandon brian bruce bryan
+callum calvin carl carlos charles charlie christopher clive colin connor craig curtis
+damian daniel darren david dean dennis derek dominic donald douglas duncan dylan eddie
+edward elliot eric ethan eugene evan finn francis frank frederick gareth gary gavin
+geoffrey george gerald gordon graham gregory harold harrison harry harvey henry howard
+hugh hugo ian isaac jack jacob jake james jason jeffrey jeremy jerry jim jimmy joe joel
+john jonathan joseph joshua julian justin keith kenneth kevin kieran larry lawrence leo
+leon leonard lewis liam logan louis luke malcolm marcus mark martin matthew max michael
+mike mohammed muhammad nathan neil nicholas nigel noah norman oliver oscar owen patrick
+paul peter philip ralph raymond reginald richard rob robert roger ronald rory ross roy
+russell ryan samuel scott sean sebastian simon spencer stanley stephen steve steven stuart
+terence terry theo theodore thomas timothy toby todd tom tony trevor tyler victor vincent
+walter wayne william zachary ahmed ali hassan omar kenji wei raj arjun pedro diego marco
+""".split())
+
+
 def name_gender(first: str) -> str | None:
-    """'F', 'M' or None if unknown/ambiguous. Hyphenated names use the first part."""
+    """'F', 'M' or None if unknown/ambiguous. Hyphenated names use the first part.
+
+    Swedish lists first; English first names as a fallback for gender only.
+    """
     f, m, _ = _name_lists()
     n = first.lower()
     if n not in f and n not in m:
         n = n.split("-")[0]
+    if n not in f and n not in m:
+        f, m = _ENGLISH_FEMALE, _ENGLISH_MALE
     in_f, in_m = n in f, n in m
     if in_f and not in_m:
         return "F"

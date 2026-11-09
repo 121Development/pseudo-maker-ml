@@ -296,3 +296,68 @@ def test_unrelated_people_get_different_fake_surnames():
     )]
     surnames = [f.split()[-1] for f in fakes_]
     assert len(set(surnames)) == len(surnames), fakes_
+
+
+def test_fakes_never_share_a_word_across_entities():
+    """A company fake must not reuse a person's fake surname (or vice versa):
+    restore could not tell which one an occurrence belongs to."""
+    import re as _re
+
+    for seed in range(30):
+        m = Mapper(seed=seed)
+        for typ, val in [("PERSON", "Anna-Karin Lindqvist"), ("PERSON", "Per Åkesson"),
+                         ("PERSON", "Lars-Erik Johansson"), ("COMPANY", "Skanska"),
+                         ("COMPANY", "Nordström Bygg AB"), ("COMPANY", "Ericsson"), ("CITY", "Malmö")]:
+            m.map(typ, val)
+        seen: dict[str, str] = {}
+        for e in m.all_entries():
+            for part in {p.lower() for p in _re.split(r"[\s\-&]+", e.fake) if len(p) >= 3 and p.isalpha()} - {"ab"}:
+                assert part not in seen or seen[part] == e.id, (seed, part, e.fake)
+                seen[part] = e.id
+
+
+def test_restore_prefers_full_fake_over_alias_on_tie():
+    from pseudo_maker.restore.restore import restore
+
+    entries = [
+        {"id": "p", "type": "PERSON", "original": "Anna Lindqvist", "fake": "Eva Berg",
+         "fake_aliases": {"Lindqvist": "Berg"}},
+        {"id": "c", "type": "COMPANY", "original": "Skanska", "fake": "Berg", "fake_aliases": {}},
+    ]
+    out, _ = restore("Hon jobbar på Berg.", entries)
+    assert out == "Hon jobbar på Skanska."
+
+
+@pytest.mark.usefixtures("needs_ner")
+@pytest.mark.parametrize("seed", range(0, 25))
+def test_contract_docx_round_trips_for_many_seeds(tmp_path, seed):
+    from docx import Document
+
+    doc = Document()
+    doc.add_paragraph("Mellan Nordström Bygg AB och Anna-Karin Lindqvist, personnummer 19850312-2387.")
+    doc.add_paragraph("Annas chef är Per Åkesson. Hon har arbetat inom Skanska och Ericsson.")
+    doc.add_paragraph("Hennes make Lars-Erik Johansson bor i Malmö.")
+    t = doc.add_table(rows=1, cols=2)
+    t.cell(0, 0).text = "Lindqvist"
+    t.cell(0, 1).text = "Åkesson"
+    src, cleaned, mapping, restored = (tmp_path / n for n in ("a.docx", "c.docx", "m.json", "r.docx"))
+    doc.save(str(src))
+    orchestrate.clean_docx(src, cleaned, mapping, seed=seed)
+    orchestrate.restore_docx(cleaned, restored, mapping)
+
+    def texts(p):
+        d = Document(str(p))
+        return [x.text for x in d.paragraphs] + [c.text for r in d.tables[0].rows for c in r.cells]
+    assert texts(restored) == texts(src)
+
+
+def test_english_first_names_keep_gender_but_are_not_known_names():
+    from pseudo_maker.swedish import is_known_name
+
+    rng = random.Random(0)
+    for original, want in (("Gareth Hughes", "M"), ("Emma Thompson", "F"), ("Priya Sharma", "F"), ("Kenji Watanabe", "M")):
+        assert name_gender(original.split()[0]) == want
+        for _ in range(20):
+            assert name_gender(fakes.fake_person(original, rng).split()[0]) in (want, None)
+    assert name_gender("Jordan") is None            # unisex: left random
+    assert not is_known_name("Grace") and not is_known_name("Will")  # words, not detection hints
