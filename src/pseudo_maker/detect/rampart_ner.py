@@ -99,6 +99,11 @@ class RampartRecognizer:
             if ptype == "PERSON" and " " not in value.strip() and score < 0.8 and not sv.is_known_name(value):
                 note_rejected(rejected, ptype, text, start, end, score, "single word, low confidence")
                 continue
+            # Rampart strips accents, so "Lön" looks like the name "Lon" to it.
+            # A lone word with å/ä/ö must be a known name to count as a person.
+            if (ptype == "PERSON" and " " not in value.strip() and any(c in "åäöÅÄÖ" for c in value)
+                    and not sv.is_known_name(value)):
+                continue
             pieces = split_conjunctions(text, start, end) if ptype == "PERSON" else [(start, end)]
             for a, b in pieces:
                 span = postprocess(ptype, text, a, b, confidence=round(score, 3))

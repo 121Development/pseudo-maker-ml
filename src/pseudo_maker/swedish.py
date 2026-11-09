@@ -201,11 +201,12 @@ def looks_english(text: str) -> bool:
     """Cheap stop-word vote: True if the text reads as English rather than Swedish.
 
     Short texts with no stop words (headings, names, table cells) return
-    True so the English model also gets a look at them.
+    True so the English model also gets a look at them, unless they contain
+    å/ä/ö: then they're Swedish ("2. Lön", "Övrigt", "Per Åkesson").
     """
     words = [w.lower() for w in _WORD.findall(text)]
     en = sum(w in _EN_STOP for w in words)
     sv = sum(w in _SV_STOP for w in words)
     if en == 0 and sv == 0:
-        return True
+        return not any(c in "åäöÅÄÖ" for c in text)
     return en >= sv

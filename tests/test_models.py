@@ -48,7 +48,8 @@ def test_decode_bio_joins_given_and_surname_and_street_parts():
 def test_looks_english():
     assert looks_english("Please contact John Miller at the office")
     assert not looks_english("Anna arbetar på Volvo och bor i Malmö")
-    assert looks_english("Per Åkesson")  # no stop words → let both models look
+    assert looks_english("John Miller")      # no stop words → let Rampart look too
+    assert not looks_english("2. Lön")       # …unless it has å/ä/ö: Swedish heading
 
 
 def test_fake_id_number_keeps_shape():
@@ -161,3 +162,15 @@ def test_gold_set_leak_free_recall(gold: str, minimum: float):
     precision = stats["all"]["tp"] / stats["all"]["pred"]
     assert recall >= minimum, recall
     assert precision >= 0.95, precision
+
+
+@needs_kb
+@needs_rampart
+def test_swedish_headings_are_not_names():
+    from pseudo_maker.detect.pipeline import DetectionPipeline
+    from pseudo_maker.detect.rampart_ner import RampartRecognizer
+
+    p = DetectionPipeline(ner="kb", english_ner="auto")
+    for heading in ("2. Lön", "Lön", "3. Övrigt", "Förmåner"):
+        assert p.detect(heading) == [], heading
+        assert list(RampartRecognizer().find(heading)) == [], heading
