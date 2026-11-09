@@ -282,6 +282,13 @@ def preview_docx(
     return session, _collect_preview_entities(session)
 
 
+def _shift(item, offset: int):
+    """Move a Span or Candidate found in a line to whole-text offsets."""
+    import dataclasses
+
+    return dataclasses.replace(item, start=item.start + offset, end=item.end + offset)
+
+
 def preview_text(
     input_path: Path,
     *,
@@ -294,8 +301,17 @@ def preview_text(
     mapper = Mapper(seed=seed)
     text = text_io.read_text(input_path)
 
-    found, raw_cands = pipeline.detect_with_candidates(text)
-    spans = propagate_person_names([text], [found])[0]
+    # Detect line by line, like paragraphs in a .docx: the language check
+    # and the models then see one paragraph / table row / list item at a time
+    # instead of a whole mixed Swedish-English document.
+    lines = [(m.start(), m.group()) for m in re.finditer(r"[^\n]+", text)]
+    detected = [pipeline.detect_with_candidates(line) if line.strip() else ([], []) for _, line in lines]
+    per_line = propagate_person_names([line for _, line in lines], [d[0] for d in detected])
+    spans: list[Span] = []
+    cands: list[Candidate] = []
+    for (offset, _line), line_spans, (_, line_cands) in zip(lines, per_line, detected):
+        spans.extend(_shift(s, offset) for s in line_spans)
+        cands.extend(_shift(c, offset) for c in filter_candidates(line_spans, line_cands))
     mapped_spans = _map_spans(mapper, spans)
 
     session = CleanSession(
@@ -304,7 +320,7 @@ def preview_text(
         mapper=mapper,
         text=text,
         mapped_spans=mapped_spans,
-        candidates=[filter_candidates(spans, raw_cands)],
+        candidates=[cands],
     )
     return session, _collect_preview_entities(session)
 
@@ -409,7 +425,11 @@ def restore_docx(
             docx_io.apply_paragraph_replacements(handle, _diff_replacements(handle.full_text, new_text))
         for hit in report.exact:
             seen_entry_ids_exact.add(hit["entry_id"])
-            full_report.exact.append(hit)
+            prev = next((h for h in full_report.exact if h["entry_id"] == hit["entry_id"]), None)
+            if prev:
+                prev["count"] += hit["count"]   # one line per mapping, summed over paragraphs
+            else:
+                full_report.exact.append(dict(hit))
         for hit in report.fuzzy:
             seen_entry_ids_fuzzy.add(hit["entry_id"])
             full_report.fuzzy.append(hit)
@@ -438,7 +458,7 @@ def _diff_replacements(old: str, new: str) -> list[tuple[int, int, str]]:
     ]
 
 
-AUDIT_SCHEMA_VERSION = 1
+AUDIT_SCHEMA_VERSION = 2
 
 
 def write_audit_log(
@@ -448,7 +468,12 @@ def write_audit_log(
     restored_document: str,
     mapping_file: str,
 ) -> None:
-    """Persist a structured log of the restore pass alongside the restored doc."""
+    """Persist a structured log of the restore pass alongside the restored doc.
+
+    Schema v2: `not_found_in_input` (was `missing` in v1) lists mapping
+    entries whose fake never appears in the restored input. That is expected
+    when the LLM shortened the text; it is not a failed restoration.
+    """
     total = sum(int(hit.get("count", 1)) for hit in report.exact) + len(report.fuzzy)
     payload = {
         "version": AUDIT_SCHEMA_VERSION,
@@ -458,12 +483,12 @@ def write_audit_log(
         "summary": {
             "exact_count": len(report.exact),
             "fuzzy_count": len(report.fuzzy),
-            "missing_count": len(report.missing),
+            "not_found_in_input_count": len(report.missing),
             "total_replacements": total,
         },
         "exact": list(report.exact),
         "fuzzy": list(report.fuzzy),
-        "missing": list(report.missing),
+        "not_found_in_input": list(report.missing),
     }
     Path(audit_path).write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),

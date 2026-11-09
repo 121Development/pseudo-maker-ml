@@ -15,6 +15,7 @@ from .models.onnx_tagger import WordPrediction, load_tagger
 from .ner_postprocess import (
     REJECT_FLOOR,
     _titlecase_caps,
+    mask_markup,
     filter_reason,
     note_rejected,
     postprocess,
@@ -83,7 +84,7 @@ class KbSwedishNerRecognizer:
         tagger = load_tagger(self._model_dir)
         # KB-BERT is cased: ALL-CAPS names ("MOHAMMED AL-HASSAN") look like
         # acronyms to it. Title-case them first (same length → same offsets).
-        words = tagger.tag(_titlecase_caps(text))
+        words = tagger.tag(_titlecase_caps(mask_markup(text)))
         for start, end, label, score in group_io(text, words):
             mapped = _map_label(label, text[start:end])
             if mapped is None:

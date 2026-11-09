@@ -7,11 +7,14 @@ from __future__ import annotations
 
 import re
 
+from .. import swedish as sv
 from .blocklist import (
     is_blocklisted_company,
     is_blocklisted_person,
     is_country_or_continent,
+    is_currency,
     is_job_title,
+    is_label_word,
 )
 from .recognizers.base import Span
 
@@ -127,6 +130,53 @@ def _titlecase_caps(text: str) -> str:
     return out
 
 
+# Punctuation and Markdown syntax a model may include at a span's edges.
+_EDGE_PUNCT_START = "\"'([{,;:–—-•*#|>_`~"
+_EDGE_PUNCT_END = "\"')]},;:.–—-•*#|>_`~"
+
+_LINE_START = re.compile(r"(?:^|\n|\|)[ \t]*(?:[#>*\-+•]+[ \t]*|\d+[.)][ \t]*)*$")
+
+
+def _at_line_start(text: str, start: int) -> bool:
+    """True if only whitespace / list bullets / heading or table markup precede `start` on its line."""
+    return bool(_LINE_START.search(text[max(0, start - 40):start]))
+
+
+_EDGE_WORDS = r"(?:the|a|an|and|or|of|at|in|on|for|to|och|eller|i|på|vid|hos|från|till|en|ett|den|det)"
+_EDGE_WORDS_START = re.compile(rf"^(?:{_EDGE_WORDS}\s+)+")
+_EDGE_WORDS_END = re.compile(rf"(?:\s+{_EDGE_WORDS})+$")
+
+# Lowercase nouns that are part of Swedish organisation names
+# ("Uppsala universitet", "Örebro kommun", "Karolinska sjukhuset").
+_ORG_LOWER = {
+    "universitet", "universitetet", "högskola", "högskolan", "kommun", "kommuns", "region", "regionen",
+    "län", "läns", "stad", "stads", "sjukhus", "sjukhuset", "skola", "skolan", "gymnasium", "förening",
+    "föreningen", "kyrka", "kyrkan", "församling", "institutet", "akademi", "akademin", "bibliotek",
+    "museum", "museet", "tingsrätt", "hovrätt", "förvaltningsrätt", "polismyndighet", "länsstyrelse",
+    "bostäder", "fastigheter", "bygg", "konsult", "konsulter", "advokatbyrå", "revisionsbyrå",
+}
+
+_COMPANY_CONNECTORS = {
+    "i", "och", "&", "på", "av", "för", "of", "and", "the", "for", "in", "de", "du", "la", "le",
+    "von", "van", "der", "den", "det", "y", "e", "a", "an", "at", "zu", "und", "et", "&co", "co",
+}
+
+_MARKUP = re.compile(r"[#|*_>`~]")
+
+
+def mask_markup(text: str) -> str:
+    """Replace Markdown syntax with spaces (same length) before a model reads it."""
+    return _MARKUP.sub(" ", text)
+
+
+def _known_any_name(word: str) -> bool:
+    """Known Swedish first name/surname, or an English first name (also genitive)."""
+    for w in (word, re.sub(r"(?:'s|’s|s)$", "", word)):
+        if w and (sv.is_known_name(w) or sv.name_gender(w) is not None):
+            return True
+    return False
+
+
 def postprocess(
     entity_type: str,
     text: str,
@@ -141,16 +191,44 @@ def postprocess(
     `text` is the full original text; `start`/`end` index into it.
     """
     # Trim whitespace and punctuation the model may include at the edges.
-    while start < end and (text[start].isspace() or text[start] in "\"'([{,;:–—-•*"):
+    while start < end and (text[start].isspace() or text[start] in _EDGE_PUNCT_START):
         start += 1
-    while end > start and (text[end - 1].isspace() or text[end - 1] in "\"')]},;:.–—-•*"):
+    while end > start and (text[end - 1].isspace() or text[end - 1] in _EDGE_PUNCT_END):
         end -= 1
     span_text = text[start:end]
     stripped, offset = _strip_leading_noise(span_text)
     if offset:
         span_text = stripped
         start += offset
-    if not span_text.strip():
+    # Trim function words a model glued on: "the University of Edinburgh and".
+    m = _EDGE_WORDS_START.match(span_text)
+    if m and m.end() < len(span_text):
+        start += m.end()
+        span_text = span_text[m.end():]
+    m = _EDGE_WORDS_END.search(span_text)
+    if m and m.start() > 0:
+        end -= len(span_text) - m.start()
+        span_text = span_text[:m.start()]
+    if not any(c.isalnum() for c in span_text):
+        return None  # markup only ("###", "|")
+
+    words = span_text.split()
+    # Names, companies and places start with a capital letter (or a digit, for
+    # English addresses): "clarify ownership", "of SEK", "regards" are not entities.
+    first_alpha = next((c for c in span_text if c.isalpha()), "")
+    if entity_type in ("PERSON", "COMPANY", "LOCATION", "CITY", "STREET") and first_alpha.islower() \
+            and not span_text[0].isdigit():
+        return None
+    # Countries, regions and currencies are not anonymized, whatever the model calls them.
+    if is_country_or_continent(span_text) or is_currency(span_text):
+        return None
+    # Form/CV field labels ("Arbetsadress", "Thesis:") and all-label spans.
+    if all(is_label_word(w) for w in words):
+        return None
+    # A single unknown word at the start of a line or table cell is far more
+    # often a heading or label than a name ("Kontaktuppgifter", "Thesis: …").
+    if entity_type == "PERSON" and len(words) == 1 and _at_line_start(text, start) \
+            and not _known_any_name(span_text):
         return None
 
     if entity_type == "PERSON":
@@ -159,9 +237,12 @@ def postprocess(
     elif entity_type == "COMPANY":
         if _should_reject_company(span_text):
             return None
-    elif entity_type in ("LOCATION", "CITY", "STREET"):
-        if is_country_or_continent(span_text):
+        # Company names are capitalised word by word, apart from connectors:
+        # "Message to international" / "Administrativ samordnare" are headings.
+        if any(w[0].islower() and w.lower() not in _COMPANY_CONNECTORS and w.lower().rstrip(".,") not in _ORG_LOWER
+               for w in words[1:]):
             return None
+    elif entity_type in ("LOCATION", "CITY", "STREET"):
         if entity_type == "LOCATION":
             entity_type = _classify_location(span_text)
     return Span(start=start, end=end, type=entity_type, value=span_text, confidence=confidence, source=source)

@@ -36,11 +36,18 @@ _DOUBLE_FEMALE = [
     "Anna-Karin", "Anna-Lena", "Ann-Sofie", "Ann-Christin", "Ann-Charlotte",
     "Eva-Lena", "Eva-Karin", "Britt-Marie", "Maj-Britt", "Anna-Maria",
     "Lena-Maria", "Ann-Marie", "Karin-Sofia", "Inga-Lill", "Gun-Britt",
+    "Ann-Louise", "Ann-Kristin", "Anna-Clara", "Anna-Stina", "Britt-Inger",
+    "Eva-Britt", "Gun-Marie", "Inga-Britt", "Kerstin-Maria", "Lill-Marie",
+    "Maj-Lis", "Mari-Ann", "Marie-Louise", "Rose-Marie", "Sara-Lena",
+    "Sonja-Lena", "Ulla-Britt", "Elsa-Maria", "Ebba-Sofia", "Ida-Maria",
 ]
 _DOUBLE_MALE = [
     "Lars-Erik", "Per-Olof", "Jan-Erik", "Karl-Johan", "Carl-Johan", "Sven-Erik",
     "Lars-Göran", "Per-Anders", "Nils-Erik", "Jan-Olof", "Karl-Erik", "Bengt-Göran",
-    "Hans-Åke", "Per-Erik", "Lars-Olof",
+    "Hans-Åke", "Per-Erik", "Lars-Olof", "Bo-Göran", "Carl-Axel", "Claes-Göran",
+    "Gustav-Adolf", "Jan-Åke", "Karl-Gustav", "Lars-Gunnar", "Lars-Ivar", "Leif-Åke",
+    "Mats-Olov", "Nils-Göran", "Olle-Bertil", "Per-Gunnar", "Sven-Olof", "Stig-Arne",
+    "Tor-Björn", "Ulf-Peter", "Bengt-Åke", "Hans-Olof", "Sten-Åke", "Jan-Ove",
 ]
 
 
@@ -174,12 +181,22 @@ def fake_phone(original: str, rng: random.Random) -> str:
     '070-123 45 67' → '070-842 19 03', '+46 8 555 123 45' → '+46 8 731 904 22'.
     """
     digits = re.sub(r"\D", "", original)
-    if original.lstrip().startswith("+46"):
+    stripped = original.lstrip()
+    if stripped.startswith("+46"):
         keep = 3 + (2 if digits[2:3] == "7" else 1)   # 46 + '7x' mobile or area digit
+    elif stripped.startswith("+"):
+        # Other countries: keep the country code and the first national digit
+        # ('+44 7…' stays a UK mobile). Country codes are 1–3 digits.
+        cc = 1 if digits[:1] in "17" else (3 if digits[:2] in _THREE_DIGIT_CC_PREFIXES else 2)
+        keep = cc + 1 + (1 if "(0)" in original else 0)
     else:
         keep = 3 if digits[1:2] == "7" else 2         # '07x' mobile or '0x' area
     new = digits[:keep] + sv.random_digits(len(digits) - keep, rng)
     return sv.reshape_digits(original, new)
+
+
+# First two digits of 3-digit country codes (Finland 358, Ireland 353, Iceland 354 …).
+_THREE_DIGIT_CC_PREFIXES = {"35", "37", "38", "42", "50", "59", "67", "68", "69", "85", "88", "96", "97", "99", "21", "22", "23", "24", "25", "26", "29"}
 
 
 _PUBLIC_MAIL_DOMAINS = {
@@ -215,14 +232,9 @@ def fake_email(
     local, _, domain = original.partition("@")
     new_local = None
     if name_hint:
-        orig_parts, fake_parts = _name_parts(name_hint[0]), _name_parts(name_hint[1])
-        if len(orig_parts) == len(fake_parts):
-            table = dict(zip(orig_parts, fake_parts))
-            pat = re.compile("|".join(re.escape(p) for p in sorted(table, key=len, reverse=True)))
-            folded = sv.ascii_fold(local).lower()
-            candidate = pat.sub(lambda m: table[m.group(0)], folded)
-            if candidate != folded:
-                new_local = candidate
+        candidate = _replace_name_parts(local, *name_hint)
+        if candidate is not None:
+            new_local = sv.ascii_fold(candidate).lower()
     if new_local is None:
         parts = _name_parts(_fake_se.name())
         sep_m = re.search(r"[._\-]", local)
@@ -240,14 +252,39 @@ def fake_email(
     return f"{new_local}@{new_domain}"
 
 
-def fake_url(original: str, rng: random.Random) -> str:
+def fake_url(original: str, rng: random.Random, name_hint: tuple[str, str] | None = None) -> str:
+    """New domain, same path — except name parts in the path, which get the
+    fake person's name: '/in/emilia-astrom-lind' → '/in/ingela-karlsson-grahn'.
+    """
     Faker.seed(rng.randint(0, 2**31))
-    # Preserve scheme and any path
     m = re.match(r"^(https?://)([^/]+)(.*)$", original, re.IGNORECASE)
     if not m:
         return _fake_en.url()
     scheme, _host, path = m.groups()
+    if name_hint:
+        path = _replace_name_parts(path, *name_hint) or path
     return f"{scheme}{_fake_en.domain_name()}{path}"
+
+
+def _replace_name_parts(text: str, original_name: str, fake_name: str) -> str | None:
+    """Swap the parts of a real name in `text` (lower-cased, ASCII-folded) for the
+    fake name's parts. None if no part was found or the names don't line up."""
+    orig_parts, fake_parts = _name_parts(original_name), _name_parts(fake_name)
+    if len(orig_parts) != len(fake_parts):
+        return None
+    table = dict(zip(orig_parts, fake_parts))
+    pat = re.compile(r"(?<![a-z])(" + "|".join(re.escape(p) for p in sorted(table, key=len, reverse=True)) + r")(?![a-z])")
+    folded = sv.ascii_fold(text).lower()
+    if not pat.search(folded):
+        return None
+    # Rebuild on the folded text but keep the original's other characters.
+    out, pos = [], 0
+    for mt in pat.finditer(folded):
+        out.append(text[pos:mt.start()])
+        out.append(table[mt.group(0)])
+        pos = mt.end()
+    out.append(text[pos:])
+    return "".join(out)
 
 
 def fake_ip(original: str, rng: random.Random) -> str:

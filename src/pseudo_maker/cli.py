@@ -117,7 +117,8 @@ def restore(
         for hit in report.fuzzy:
             console.print(f"  '{hit['matched_text']}' → '{hit['original']}' (score {hit['score']})")
     if report.missing:
-        console.print(f"[red]{len(report.missing)} entities NOT found in LLM output:[/red]")
+        console.print(f"[yellow]{len(report.missing)} mapped entities don't appear in this input[/yellow] "
+                      "(expected if the LLM shortened the text):")
         for hit in report.missing:
             console.print(f"  {hit['entry_id']} {hit['type']} '{hit['fake']}' (original: '{hit['original']}')")
     console.print(f"[green]Wrote[/green] {out}")

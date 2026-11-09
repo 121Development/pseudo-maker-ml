@@ -850,7 +850,7 @@ function renderRestoreReport(report) {
 
   if (report.missing.length) {
     box.appendChild(reportSection(
-      `✗ Not found in LLM output (${report.missing.length}) — the LLM may have dropped or rewrote these`,
+      `○ Not in this document (${report.missing.length}) — expected if the LLM shortened the text; check any you expected to see`,
       'missing',
       report.missing,
       (h) => `
@@ -858,7 +858,7 @@ function renderRestoreReport(report) {
         <span class="r-fake">${escapeHtml(h.fake)}</span>
         <span class="r-arrow">—</span>
         <span class="r-original">(would have been ${escapeHtml(h.original)})</span>`,
-      true,
+      false,
     ));
   }
 }

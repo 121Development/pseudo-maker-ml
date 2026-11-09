@@ -33,3 +33,15 @@ class PostalCodeSeRecognizer:
             if _STANDARDS_PREFIX.search(left):
                 continue
             yield Span(m.start(), m.end(), self.name, m.group(0), 0.7, "regex")
+
+
+# UK postcodes: "SW1A 1AA", "M1 1AE", "BS1 1AA", "EC2R 8AH".
+_UK = re.compile(r"(?<![\w-])([A-Z]{1,2}\d[A-Z\d]?)[ \t]?(\d[A-Z]{2})(?![\w-])")
+
+
+class UkPostcodeRecognizer:
+    name = "POSTAL_CODE"
+
+    def find(self, text: str) -> Iterable[Span]:
+        for m in _UK.finditer(text):
+            yield Span(m.start(), m.end(), self.name, m.group(0), 0.85, "regex")

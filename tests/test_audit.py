@@ -34,17 +34,17 @@ def test_write_audit_log_matches_schema(tmp_path: Path):
     )
     payload = json.loads(audit_path.read_text(encoding="utf-8"))
 
-    assert payload["version"] == 1
+    assert payload["version"] == 2
     assert payload["restored_document"] == "doc_RESTORED.docx"
     assert payload["mapping_used"] == "doc_MAPPING.json"
     assert payload["summary"]["exact_count"] == 2
     assert payload["summary"]["fuzzy_count"] == 1
-    assert payload["summary"]["missing_count"] == 1
+    assert payload["summary"]["not_found_in_input_count"] == 1
     # total = 5 + 1 exact occurrences + 1 fuzzy = 7
     assert payload["summary"]["total_replacements"] == 7
     assert payload["exact"][0]["type"] == "PERSON"
     assert payload["fuzzy"][0]["type"] == "PERSON"
-    assert payload["missing"][0]["type"] == "EMAIL"
+    assert payload["not_found_in_input"][0]["type"] == "EMAIL"
 
 
 def test_cli_restore_writes_audit_log(tmp_path: Path):

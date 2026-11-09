@@ -13,7 +13,14 @@ from typing import Iterable
 from .. import models
 from .. import swedish as sv
 from .models.onnx_tagger import WordPrediction, load_tagger
-from .ner_postprocess import REJECT_FLOOR, filter_reason, note_rejected, postprocess, split_conjunctions
+from .ner_postprocess import (
+    REJECT_FLOOR,
+    filter_reason,
+    mask_markup,
+    note_rejected,
+    postprocess,
+    split_conjunctions,
+)
 from .recognizers.base import Span
 
 # Rampart type → (group key, pseudo-maker type). Types in the same group that
@@ -85,7 +92,7 @@ class RampartRecognizer:
     def find(self, text: str, rejected: list | None = None) -> Iterable[Span]:
         """Yield accepted spans; append near-misses to `rejected` if given."""
         tagger = load_tagger(self._model_dir)
-        for start, end, ptype, score in decode_bio(text, tagger.tag(text)):
+        for start, end, ptype, score in decode_bio(text, tagger.tag(mask_markup(text))):
             value = text[start:end]
             if score < self.min_score:
                 if score >= REJECT_FLOOR and ptype in ("PERSON", "CITY", "STREET", "ID_NUMBER"):

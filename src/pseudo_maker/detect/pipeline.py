@@ -35,7 +35,7 @@ from .recognizers.passport import PassportRecognizer
 from .recognizers.places import KnownPlaceRecognizer
 from .recognizers.personnummer import PersonnummerRecognizer
 from .recognizers.phone_se import PhoneSeRecognizer
-from .recognizers.postal_code_se import PostalCodeSeRecognizer
+from .recognizers.postal_code_se import PostalCodeSeRecognizer, UkPostcodeRecognizer
 from .recognizers.vat import VatRecognizer
 
 
@@ -57,6 +57,7 @@ def _default_regex_recognizers():
         LicensePlateSeRecognizer(),
         PassportRecognizer(),
         PostalCodeSeRecognizer(),
+        UkPostcodeRecognizer(),
         DateRecognizer(),
         AgeRecognizer(),
         StreetSeRecognizer(),
@@ -222,10 +223,14 @@ def propagate_person_names(texts: Sequence[str], spans_per_text: list[list[Span]
     from .blocklist import is_blocklisted_person
 
     parts: set[str] = set()
+    first_names: set[str] = set()
     for spans in spans_per_text:
         for s in spans:
             if s.type != "PERSON":
                 continue
+            toks = s.value.split()
+            if len(toks) >= 2:
+                first_names.add(toks[0])
             for tok in s.value.split():
                 if (tok.lower() in sv.NAME_PARTICLES or len(tok) < 2 or is_blocklisted_person(tok)
                         or not tok[0].isupper()):
@@ -233,7 +238,7 @@ def propagate_person_names(texts: Sequence[str], spans_per_text: list[list[Span]
                 if tok.isupper():
                     tok = "-".join(p[:1] + p[1:].lower() for p in tok.split("-"))
                 parts.add(tok)
-    if not parts:
+    if not parts and not first_names:
         return spans_per_text
 
     alts = "|".join(re.escape(p) for p in sorted(parts, key=len, reverse=True))
@@ -243,7 +248,13 @@ def propagate_person_names(texts: Sequence[str], spans_per_text: list[list[Span]
 
     out: list[list[Span]] = []
     for text, spans in zip(texts, spans_per_text):
-        new = list(spans)
+        # "Hej Sofia," tagged as the city Sofia while "Sofia Bergström" is a
+        # person in the same document: it's her first name.
+        new = [
+            Span(s.start, s.end, "PERSON", s.value, s.confidence, "ner")
+            if s.type == "CITY" and s.value in first_names else s
+            for s in spans
+        ]
         for m in pat.finditer(text):
             start, end = m.start(), m.end()
             if any(start < s.end and s.start < end for s in new):

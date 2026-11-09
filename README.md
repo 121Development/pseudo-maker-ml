@@ -261,7 +261,7 @@ pip install --index-url https://download.pytorch.org/whl/cpu torch
 pip install -e ".[dev,export,spacy]"
 python -m spacy download sv_core_news_lg
 pseudo-maker fetch-models        # Rampart download + KB-BERT ONNX export (~2 min)
-pytest                           # ~125 tests; model tests skip if models are missing
+pytest                           # ~215 tests; model tests skip if models are missing
 python scripts/eval_ner.py       # precision / recall table per setup
 pseudo-maker serve             # start the web UI
 ```
@@ -294,7 +294,12 @@ Below both views:
 
 Click **Finalize** and you get two downloads: `<name>_CLEANED.<ext>` and `<name>_MAPPING.json`.
 
-**Restore tab** — drop the LLM's response file and the mapping JSON. You get back `<name>_RESTORED.<ext>` plus a visible report of what was restored exactly, what matched fuzzily (when the LLM lightly rewrote a fake), and what was missing. A `<name>_AUDIT.json` download gives you the machine-readable version of the same report.
+**Restore tab** — drop the LLM's response file and the mapping JSON. You get back `<name>_RESTORED.<ext>` plus a visible report:
+- what was restored exactly, with the number of replacements made
+- what matched fuzzily, when the LLM lightly rewrote a fake
+- which mapped entities don't appear in the input
+
+The last group is expected when the LLM shortened the text; it is not a failed restoration. A `<name>_AUDIT.json` download gives you the machine-readable version of the same report (schema v2; the last group is `not_found_in_input`).
 
 ### CLI
 

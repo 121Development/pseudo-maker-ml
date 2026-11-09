@@ -26,6 +26,22 @@ def _company_core(value: str) -> str:
     return _normalize(_PUBL.sub("", value))
 
 
+def _is_sub_name(short: list[str], full: list[str]) -> bool:
+    """True if `short` keeps the first and last part of `full` and drops some in between."""
+    if not (2 <= len(short) < len(full)) or short[0] != full[0] or short[-1] != full[-1]:
+        return False
+    it = iter(full)
+    return all(any(tok == f for f in it) for tok in short)
+
+
+def _key(entity_type: str, value: str) -> tuple[str, str]:
+    """Lookup key. Phones are keyed by number, so every format of the same
+    number ('070-000 01 21', '+46 70 000 01 21') shares one entry."""
+    if entity_type == "PHONE":
+        return (entity_type, sv.phone_key(value))
+    return (entity_type, _normalize(value))
+
+
 def _parts(value: str) -> list[str]:
     """Name parts, split on whitespace and hyphens: 'Anna-Karin Lindqvist' → [anna, karin, lindqvist]."""
     return [p for p in re.split(r"[\s\-]+", value.lower()) if p]
@@ -126,6 +142,16 @@ class Mapper:
             if not bad:
                 self._register_fake(candidate)
                 return candidate
+        if entity_type in GENITIVE_TYPES:
+            # Relax: allow sharing a word with another fake, but never a real
+            # value or an identical fake. Better than a "_1234" suffix.
+            for _ in range(50):
+                candidate = generate_fake(entity_type, original, self.rng, **hints)
+                if candidate != original and candidate not in self._used_fakes \
+                        and candidate.lower() not in self._reserved \
+                        and not any(p in self._reserved for p in self._name_parts(candidate)):
+                    self._register_fake(candidate)
+                    return candidate
         # Last-resort suffix to guarantee uniqueness
         candidate = f"{candidate}_{self.rng.randint(1000, 9999)}"
         self._register_fake(candidate)
@@ -141,6 +167,16 @@ class Mapper:
             for (t, _), e in self._by_key.items():
                 if t == "COMPANY" and _company_core(e.original) == core:
                     return e
+        if entity_type == "PERSON" and len(text.split()) >= 2:
+            # "Emilia Lind" is "Emilia Åström Lind" without the middle name:
+            # same first and last name, fewer parts, in order.
+            toks = [t.lower() for t in text.split()]
+            matches = {
+                id(e): e for (t, _), e in self._by_key.items()
+                if t == "PERSON" and _is_sub_name(toks, [x.lower() for x in e.original.split()])
+            }
+            if len(matches) == 1:
+                return next(iter(matches.values()))
         if entity_type in ALIAS_TYPES and len(text.split()) == 1:
             want = text.lower()
             candidates = {
@@ -160,8 +196,8 @@ class Mapper:
 
     def _email_name_hint(self, email: str) -> tuple[str, str] | None:
         """(original, fake) of the PERSON whose name the email local part is built from."""
-        local = sv.ascii_fold(email.partition("@")[0]).lower()
-        local_parts = set(p for p in re.split(r"[._\-+]+", local) if p)
+        local = sv.ascii_fold(email.partition("@")[0] if "@" in email else email).lower()
+        local_parts = set(p for p in re.split(r"[^a-z0-9]+", local) if p)
         best = None
         for (t, _), e in self._by_key.items():
             if t != "PERSON":
@@ -182,7 +218,7 @@ class Mapper:
           * A genitive ("Annas", "Per Åkessons", "Volvos") reuses the entry of
             its base form, and its fake gets the genitive too ("Karins").
         """
-        key = (entity_type, _normalize(original))
+        key = _key(entity_type, original)
         if key in self._by_key:
             entry = self._by_key[key]
             entry.occurrences += 1
@@ -223,8 +259,8 @@ class Mapper:
                 return self._new_relative(original, key, relative)
 
         hints = {}
-        if entity_type == "EMAIL":
-            hint = self._email_name_hint(original)
+        if entity_type in ("EMAIL", "URL"):
+            hint = self._email_name_hint(original if entity_type == "EMAIL" else original.split("://", 1)[-1].split("/", 1)[-1])
             if hint:
                 hints["name_hint"] = hint
         entry = MappingEntry(
@@ -274,6 +310,15 @@ class Mapper:
         base = entry.genitive_of.get(alias_text)
         if base is not None:
             return sv.genitive(self.fake_for_alias(entry, base))
+        if entry.type == "PHONE":
+            return sv.render_phone(alias_text, sv.phone_key(entry.fake)) or entry.fake
+        if entry.type == "PERSON" and len(alias_text.split()) >= 2:
+            orig_toks, fake_toks = entry.original.split(), entry.fake.split()
+            if len(orig_toks) == len(fake_toks):
+                by_tok = {o.lower(): f for o, f in zip(orig_toks, fake_toks)}
+                rendered = [by_tok.get(t.lower()) for t in alias_text.split()]
+                if all(rendered):
+                    return sv.match_case(alias_text, " ".join(rendered))
         if entry.type == "COMPANY" and _company_core(alias_text) == _company_core(entry.original):
             fake_core = _PUBL.sub("", entry.fake)
             return fake_core + alias_text[len(_PUBL.sub("", alias_text)):] if _PUBL.search(alias_text) else fake_core

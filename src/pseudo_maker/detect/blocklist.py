@@ -86,6 +86,10 @@ COUNTRIES_AND_CONTINENTS: set[str] = {
     "irak", "iran", "syrien", "libanon", "israel", "saudiarabien",
     "australien", "nya zeeland",
     "europa", "asien", "afrika", "nordamerika", "sydamerika", "oceanien",
+    # Regions / multi-country names
+    "norden", "skandinavien", "nordics", "scandinavia", "baltikum", "eu", "europeiska unionen",
+    "european union", "united kingdom", "kingdom", "uk", "great britain", "united states",
+    "united states of america", "us", "the netherlands", "the united kingdom", "storbritannien",
     # English variants we might see in mixed-language CVs
     "sweden", "norway", "denmark", "germany", "france", "spain", "italy",
     "britain", "england", "netherlands", "belgium", "switzerland", "austria",
@@ -143,6 +147,9 @@ COMPANY_BLOCKLIST |= {
 
 # Job-title words: a span made only of these is a role, not a company or person.
 JOB_WORDS: set[str] = {
+    "learning", "training", "service", "services", "improvement", "relationship", "client",
+    "delivery", "unit", "programme", "coordinator", "administrative", "operations", "chair",
+    "partner", "sponsor", "colleague", "supervisor", "trainer", "programme", "teacher",
     "data", "scientist", "engineer", "developer", "analyst", "manager", "consultant",
     "senior", "junior", "lead", "head", "chief", "officer", "director", "designer",
     "architect", "specialist", "coordinator", "assistant", "intern", "trainee",
@@ -166,3 +173,39 @@ def is_blocklisted_company(value: str) -> bool:
     if v in COMPANY_BLOCKLIST or is_job_title(v):
         return True
     return " " not in v and v.endswith(_AGENCY_SUFFIX)
+
+
+# Field labels in CVs, forms and email headers. A model sometimes tags the
+# label of a table cell or a "Label:" line as a name ("Arbetsadress", "Thesis").
+LABEL_WORDS: set[str] = {
+    # Swedish
+    "arbetsadress", "bostadsadress", "postadress", "adress", "kontaktuppgifter", "kontakt",
+    "personnummer", "födelsedatum", "telefon", "mobil", "e-post", "mejl", "arbetsmejl",
+    "befattning", "relation", "referensspråk", "referens", "referenser", "profil", "portfolio",
+    "körkort", "medborgarskap", "tilltalsnamn", "namn", "fullständigt", "uppgift", "fält",
+    "utbildning", "arbetslivserfarenhet", "språk", "kompetenser", "examensarbete", "handledare",
+    "kursledare", "från", "till", "kopia", "datum", "ämne", "bilaga", "meddelande",
+    "sammanfattning", "övrigt", "underskrifter", "vänliga", "hälsningar", "hej",
+    # English
+    "title", "relationship", "email", "telephone", "phone", "mobile", "office", "address",
+    "language", "languages", "thesis", "subject", "date", "from", "to", "cc", "bcc", "contact",
+    "profile", "summary", "experience", "education", "skills", "references", "reference",
+    "appendix", "correspondence", "name", "field", "value", "nationality", "citizenship",
+    "curriculum", "vitae", "resume", "professional", "dear", "regards", "best", "kind",
+    "sincerely", "note", "notes",
+}
+
+
+def is_label_word(value: str) -> bool:
+    return normalize(value).rstrip(":") in LABEL_WORDS
+
+
+# Currencies and amount units: never an entity ("SEK 12 million", "45 tkr").
+CURRENCY_WORDS: set[str] = {
+    "sek", "kr", "kronor", "kronur", "tkr", "mkr", "msek", "ksek", "eur", "euro", "euros", "usd",
+    "dollar", "dollars", "gbp", "pund", "pounds", "nok", "dkk", "chf", "jpy", "cny", "isk", "pln",
+}
+
+
+def is_currency(value: str) -> bool:
+    return normalize(value).strip(".") in CURRENCY_WORDS

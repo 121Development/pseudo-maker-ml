@@ -25,6 +25,7 @@ from .ner_postprocess import (  # noqa: F401  (re-exported for tests/back-compat
     _should_reject_person,
     _strip_leading_noise,
     _titlecase_caps,
+    mask_markup,
     filter_reason,
     note_rejected,
     postprocess,
@@ -63,7 +64,7 @@ class SwedishNerRecognizer:
         # spaCy misses names written in capitals ("MOHAMMED AL-HASSAN"), common
         # in Swedish headings and forms. Title-case all-caps words before NER;
         # same length, so offsets map straight back to the original text.
-        doc = nlp(_titlecase_caps(text))
+        doc = nlp(_titlecase_caps(mask_markup(text)))
         for ent in doc.ents:
             mapped = _LABEL_MAP.get(ent.label_)
             if not mapped:

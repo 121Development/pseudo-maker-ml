@@ -118,7 +118,6 @@ def restore(
     matched_entry_ids: set[str] = set()
     ranked: list[tuple[int, tuple[int, int, str, str]]] = []
     for entry in entries:
-        local_count = 0
         for search, replacement in _candidates_for(entry):
             # Rank 0 = an entity's full fake, 1 = a short form/alias. On an
             # exact tie the full fake wins (a company called "Berg" beats the
@@ -126,19 +125,22 @@ def restore(
             rank = 0 if search == entry["fake"] else 1
             for start, end in _find_matches(text, search):
                 ranked.append((rank, (start, end, replacement, entry["id"])))
-                local_count += 1
-        if local_count > 0:
-            matched_entry_ids.add(entry["id"])
-            report.exact.append({
-                "entry_id": entry["id"],
-                "type": entry.get("type", ""),
-                "fake": entry["fake"],
-                "original": entry["original"],
-                "count": local_count,
-            })
 
     spans = [sp for _, sp in sorted(ranked, key=lambda r: r[0])]  # stable: ties keep rank order
-    out = _apply_spans(text, spans)
+    out, applied = _apply_spans(text, spans)
+    # Count only replacements actually made: "Eva" inside "Eva Berg" is one
+    # replacement, not two.
+    by_id = {e["id"]: e for e in entries}
+    for eid, count in _count_by_entry(applied).items():
+        entry = by_id[eid]
+        matched_entry_ids.add(eid)
+        report.exact.append({
+            "entry_id": eid,
+            "type": entry.get("type", ""),
+            "fake": entry["fake"],
+            "original": entry["original"],
+            "count": count,
+        })
 
     # Fuzzy fallback for unmatched entries
     unmatched = [e for e in entries if e["id"] not in matched_entry_ids]
@@ -189,8 +191,6 @@ def restore(
     }
     part_spans: list[tuple[int, int, str, str]] = []
     for eid, pairs in _unambiguous_part_candidates(entries).items():
-        entry = next(e for e in entries if e["id"] == eid)
-        count = 0
         for fake_part, orig_part in pairs:
             variants = [(fake_part, orig_part)]
             g = sv.genitive(fake_part)
@@ -201,21 +201,21 @@ def restore(
                     continue
                 for start, end in _find_matches(out, search):
                     part_spans.append((start, end, repl, eid))
-                    count += 1
-        if count:
-            hit = next((h for h in report.exact if h["entry_id"] == eid), None)
-            if hit:
-                hit["count"] += count
-            else:
-                report.exact.append({
-                    "entry_id": eid,
-                    "type": entry.get("type", ""),
-                    "fake": entry["fake"],
-                    "original": entry["original"],
-                    "count": count,
-                })
-            matched_entry_ids.add(eid)
-    out = _apply_spans(out, part_spans)
+    out, applied = _apply_spans(out, part_spans)
+    for eid, count in _count_by_entry(applied).items():
+        entry = by_id[eid]
+        hit = next((h for h in report.exact if h["entry_id"] == eid), None)
+        if hit:
+            hit["count"] += count
+        else:
+            report.exact.append({
+                "entry_id": eid,
+                "type": entry.get("type", ""),
+                "fake": entry["fake"],
+                "original": entry["original"],
+                "count": count,
+            })
+        matched_entry_ids.add(eid)
 
     for entry in entries:
         if entry["id"] not in matched_entry_ids:
@@ -229,8 +229,18 @@ def restore(
     return out, report
 
 
-def _apply_spans(text: str, spans: list[tuple[int, int, str, str]]) -> str:
-    """Apply non-overlapping replacements, preferring longer then earlier matches."""
+def _count_by_entry(applied: list[tuple[int, int, str, str]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for *_, eid in applied:
+        counts[eid] = counts.get(eid, 0) + 1
+    return counts
+
+
+def _apply_spans(text: str, spans: list[tuple[int, int, str, str]]) -> tuple[str, list]:
+    """Apply non-overlapping replacements, preferring longer then earlier matches.
+
+    Returns the new text and the replacements actually applied.
+    """
     spans = sorted(spans, key=lambda s: (-(s[1] - s[0]), s[0]))
     accepted: list[tuple[int, int, str, str]] = []
     for s in spans:
@@ -239,7 +249,7 @@ def _apply_spans(text: str, spans: list[tuple[int, int, str, str]]) -> str:
     accepted.sort(key=lambda s: s[0], reverse=True)
     for start, end, repl, _eid in accepted:
         text = text[:start] + repl + text[end:]
-    return text
+    return text, accepted
 
 
 def _overlap(a, b) -> bool:

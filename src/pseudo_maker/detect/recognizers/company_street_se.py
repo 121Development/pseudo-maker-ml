@@ -15,7 +15,7 @@ from .base import Span
 
 _CAP = r"[A-ZÅÄÖÉ][\wåäöÅÄÖéü&.\-]*"
 _COMPANY = re.compile(
-    rf"\b({_CAP}(?:[ \t]+(?:{_CAP}|&|och|i|på))*?)[ \t]+"
+    rf"\b({_CAP}(?:[ \t]+(?:{_CAP}|&|och|i))*?)[ \t]+"
     r"(AB|HB|KB|Aktiebolag|Handelsbolag|Kommanditbolag|Ltd\.?|Limited|Inc\.?|LLC|LLP|plc|PLC|"
     r"GmbH|AG|Oy|Oyj|ASA|A/S|B\.V\.|N\.V\.|S\.A\.|Corp\.?|Corporation|Solicitors)(?![\w])([ \t]*\(publ\))?"
 )
@@ -62,12 +62,22 @@ class CompanySeRecognizer:
             yield Span(start, end, self.name, text[start:end], 0.9, "pattern")
 
 
+# English-style addresses: "14 Example Orchard Lane", "22 Sample Quay Road", "221B Baker Street".
+_EN_STREET = re.compile(
+    r"\b\d{1,5}[A-Za-z]?[ \t]+(?:[A-Z][a-z'’]+[ \t]+){1,4}"
+    r"(?:Street|St\.|Road|Rd\.|Lane|Ln\.|Avenue|Ave\.|Court|Ct\.|Close|Drive|Way|Place|Square|"
+    r"Terrace|Gardens|Crescent|Quay|Row|Mews|Hill|Boulevard|Blvd\.|Parkway|Grove|Walk|Wharf|Yard)\b"
+)
+
+
 class StreetSeRecognizer:
     name = "STREET"
 
     def find(self, text: str) -> Iterable[Span]:
         for m in _STREET.finditer(text):
             yield Span(m.start(), m.end(), self.name, m.group(0), 0.9, "pattern")
+        for m in _EN_STREET.finditer(text):
+            yield Span(m.start(), m.end(), self.name, m.group(0), 0.85, "pattern")
 
 
 # Large Swedish employers / brands that spaCy frequently misses or truncates.

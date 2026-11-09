@@ -210,3 +210,41 @@ def looks_english(text: str) -> bool:
     if en == 0 and sv == 0:
         return not any(c in "åäöÅÄÖ" for c in text)
     return en >= sv
+
+
+# --- Phone numbers ----------------------------------------------------------
+
+def phone_key(value: str) -> str:
+    """One key per phone number, whatever the format.
+
+    '070-000 01 21', '+46 70 000 01 21', '+46 (0)70 000 01 21', '0046700000121'
+    → '0700000121'. Foreign numbers keep their country code: '+44 7700 900121'
+    → '+447700900121'.
+    """
+    v = value.strip()
+    digits = re.sub(r"\D", "", v.replace("(0)", ""))
+    if v.startswith("+46") or v.startswith("0046"):
+        national = digits[4:] if v.startswith("0046") else digits[2:]
+        return "0" + national.lstrip("0")
+    if v.startswith("+") or v.startswith("00"):
+        return "+" + (digits[2:] if v.startswith("00") else digits)
+    return digits
+
+
+def render_phone(template: str, key: str) -> str | None:
+    """Write the number `key` (see phone_key) in the format of `template`."""
+    t = template.strip()
+    if key.startswith("+"):
+        digits = key[1:]
+        if t.startswith("00"):
+            digits = "00" + digits
+        if "(0)" in t:
+            cc_len = len(re.sub(r"\D", "", t.split("(0)")[0]))
+            digits = digits[:cc_len] + "0" + digits[cc_len:]
+    elif t.startswith("+46") or t.startswith("0046"):
+        digits = ("0046" if t.startswith("0046") else "46") + ("0" if "(0)" in t else "") + key[1:]
+    else:
+        digits = key
+    if len(digits) != sum(c.isdigit() for c in template):
+        return None
+    return reshape_digits(template, digits)

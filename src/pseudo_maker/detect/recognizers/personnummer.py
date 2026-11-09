@@ -23,19 +23,33 @@ def _normalize_to_10(value: str) -> str | None:
     return digits
 
 
-def is_valid_personnummer(value: str) -> bool:
+def has_valid_date(value: str) -> bool:
     d = _normalize_to_10(value)
     if not d:
         return False
-    yy, mm, dd = int(d[:2]), int(d[2:4]), int(d[4:6])
+    mm, dd = int(d[2:4]), int(d[4:6])
     # Samordningsnummer: day is real_day + 60
     if dd > 60:
         dd -= 60
-    if not (1 <= mm <= 12 and 1 <= dd <= 31):
+    return 1 <= mm <= 12 and 1 <= dd <= 31
+
+
+def is_valid_personnummer(value: str) -> bool:
+    if not has_valid_date(value):
         return False
+    d = _normalize_to_10(value)
     # The 9-digit body for Luhn is YYMMDD + 3-digit serial
-    body9 = d[:9]
-    return luhn_check(body9 + d[9])
+    return luhn_check(d[:9] + d[9])
+
+
+# A personnummer-shaped value with a wrong checksum is still identifying
+# (typos, test data, partially redacted copies). Flag it when the shape is
+# unambiguous (YYYYMMDD-NNNN with a 19xx/20xx year) or a cue word precedes it.
+_CUE = re.compile(
+    r"(?i)(?:personnummer|personnr|pers\.?\s?nr|pnr|p-nr|samordningsnummer|"
+    r"personal identity number|identity number|personal number|civic number|swedish id)\W{0,12}$"
+)
+_TWELVE_WITH_SEP = re.compile(r"^(19|20)\d{6}-\d{4}$")
 
 
 class PersonnummerRecognizer:
@@ -52,3 +66,8 @@ class PersonnummerRecognizer:
                 if is_valid_personnummer(value):
                     seen.add((start, end))
                     yield Span(start, end, self.name, value, 1.0, "regex")
+                elif has_valid_date(value) and (
+                    _TWELVE_WITH_SEP.match(value) or _CUE.search(text[max(0, start - 60):start])
+                ):
+                    seen.add((start, end))
+                    yield Span(start, end, self.name, value, 0.8, "regex")
