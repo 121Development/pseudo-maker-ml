@@ -77,7 +77,14 @@ def main(argv: list[str] | None = None) -> int:
             quantize_dynamic(str(fp32), str(target), weight_type=QuantType.QInt8)
 
     tok.backend_tokenizer.save(str(dest / "tokenizer.json"))
-    cfg = {"id2label": {str(k): v for k, v in model.config.id2label.items()}, "source": HF_ID}
+    cfg = {
+        "id2label": {str(k): v for k, v in model.config.id2label.items()},
+        "source": HF_ID,
+        "quantization": "none" if args.no_quantize else "dynamic-int8",
+        # Dynamic int8 scales activations per call: batching would make results
+        # depend on neighbouring paragraphs, so run one window per call.
+        "batch_size": 16 if args.no_quantize else 1,
+    }
     (dest / "config.json").write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # Agreement check: ONNX vs PyTorch labels per token.

@@ -81,10 +81,18 @@ class KbSwedishNerRecognizer:
 
     def find(self, text: str, rejected: list | None = None) -> Iterable[Span]:
         """Yield accepted spans; append near-misses to `rejected` if given."""
+        return self.find_many([text], [rejected])[0]
+
+    def find_many(self, texts: list[str], rejected: list[list | None] | None = None) -> list[list[Span]]:
+        """Batched find(): one model call per batch of paragraphs."""
+        rejected = rejected or [None] * len(texts)
         tagger = load_tagger(self._model_dir)
         # KB-BERT is cased: ALL-CAPS names ("MOHAMMED AL-HASSAN") look like
         # acronyms to it. Title-case them first (same length → same offsets).
-        words = tagger.tag(_titlecase_caps(mask_markup(text)))
+        tagged = tagger.tag_many([_titlecase_caps(mask_markup(t)) for t in texts])
+        return [list(self._spans(t, words, rej)) for t, words, rej in zip(texts, tagged, rejected)]
+
+    def _spans(self, text: str, words, rejected: list | None) -> Iterable[Span]:
         for start, end, label, score in group_io(text, words):
             mapped = _map_label(label, text[start:end])
             if mapped is None:

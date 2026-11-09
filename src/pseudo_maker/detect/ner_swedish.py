@@ -60,11 +60,19 @@ class SwedishNerRecognizer:
         return self._nlp
 
     def find(self, text: str, rejected: list | None = None) -> Iterable[Span]:
+        return self.find_many([text], [rejected])[0]
+
+    def find_many(self, texts: list[str], rejected: list[list | None] | None = None) -> list[list[Span]]:
+        """Batched find() via nlp.pipe."""
+        rejected = rejected or [None] * len(texts)
         nlp = self._ensure()
         # spaCy misses names written in capitals ("MOHAMMED AL-HASSAN"), common
         # in Swedish headings and forms. Title-case all-caps words before NER;
         # same length, so offsets map straight back to the original text.
-        doc = nlp(_titlecase_caps(mask_markup(text)))
+        docs = nlp.pipe((_titlecase_caps(mask_markup(t)) for t in texts), batch_size=64)
+        return [list(self._spans(t, doc, rej)) for t, doc, rej in zip(texts, docs, rejected)]
+
+    def _spans(self, text: str, doc, rejected: list | None) -> Iterable[Span]:
         for ent in doc.ents:
             mapped = _LABEL_MAP.get(ent.label_)
             if not mapped:

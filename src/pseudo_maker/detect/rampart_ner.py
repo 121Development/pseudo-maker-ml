@@ -91,8 +91,16 @@ class RampartRecognizer:
 
     def find(self, text: str, rejected: list | None = None) -> Iterable[Span]:
         """Yield accepted spans; append near-misses to `rejected` if given."""
-        tagger = load_tagger(self._model_dir)
-        for start, end, ptype, score in decode_bio(text, tagger.tag(mask_markup(text))):
+        return self.find_many([text], [rejected])[0]
+
+    def find_many(self, texts: list[str], rejected: list[list | None] | None = None) -> list[list[Span]]:
+        """Batched find(): one model call per batch of paragraphs."""
+        rejected = rejected or [None] * len(texts)
+        tagged = load_tagger(self._model_dir).tag_many([mask_markup(t) for t in texts])
+        return [list(self._spans(t, words, rej)) for t, words, rej in zip(texts, tagged, rejected)]
+
+    def _spans(self, text: str, words, rejected: list | None) -> Iterable[Span]:
+        for start, end, ptype, score in decode_bio(text, words):
             value = text[start:end]
             if score < self.min_score:
                 if score >= REJECT_FLOOR and ptype in ("PERSON", "CITY", "STREET", "ID_NUMBER"):

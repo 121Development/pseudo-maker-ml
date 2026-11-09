@@ -158,21 +158,39 @@ class DetectionPipeline:
         and capitalised words that are known names but weren't detected. They
         are not filtered against the spans here; see `filter_candidates`.
         """
-        spans: list[Span] = []
-        rejected: list[Candidate] = []
-        for r in self.regex_recognizers:
-            spans.extend(r.find(text))
-        if self.ner is not None:
-            spans.extend(self.ner.find(text, rejected))
-        english = self.english_mode == "on" or sv.looks_english(text)
-        if self.english_ner is not None and english:
-            spans.extend(self.english_ner.find(text, rejected))
-        if self.english_assist is not None and english:
-            spans.extend(self.english_assist.find(text, rejected))
-        spans = [_extend_street_number(text, s) for s in spans]
-        spans = _resolve_overlaps(spans)
-        rejected.extend(_known_name_candidates(text))
-        return spans, rejected
+        return self.detect_many([text])[0]
+
+    def detect_many(self, texts: Sequence[str]) -> list[tuple[list[Span], list[Candidate]]]:
+        """detect_with_candidates() for many paragraphs, with batched model calls."""
+        n = len(texts)
+        spans: list[list[Span]] = [[] for _ in range(n)]
+        rejected: list[list[Candidate]] = [[] for _ in range(n)]
+        active = [i for i, t in enumerate(texts) if t.strip()]
+        for i in active:
+            for r in self.regex_recognizers:
+                spans[i].extend(r.find(texts[i]))
+
+        def run(recognizer, idx: list[int]) -> None:
+            if recognizer is None or not idx:
+                return
+            found = recognizer.find_many([texts[i] for i in idx], [rejected[i] for i in idx])
+            for i, f in zip(idx, found):
+                spans[i].extend(f)
+
+        run(self.ner, active)
+        english = [i for i in active if self.english_mode == "on" or sv.looks_english(texts[i])]
+        run(self.english_ner, english)
+        run(self.english_assist, english)
+
+        active_set = set(active)
+        out = []
+        for i in range(n):
+            if i not in active_set:
+                out.append(([], []))
+                continue
+            found = _resolve_overlaps([_extend_street_number(texts[i], s) for s in spans[i]])
+            out.append((found, rejected[i] + _known_name_candidates(texts[i])))
+        return out
 
 
 _CAP_WORD = re.compile(r"(?<![\w-])[A-ZÅÄÖ][a-zåäöéü]{2,}(?:-[A-ZÅÄÖ][a-zåäöéü]+)?(?![\w-])")

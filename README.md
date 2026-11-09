@@ -53,7 +53,7 @@ A BERT model trained by [KBLab](https://kb.se/), the data lab at the National Li
 
 A small (15 MB) PII detector from National Design Studio. It's trained on 1.5 million examples in seven languages: English, Spanish, French, German, Italian, Portuguese and Dutch. It labels given names, surnames, street names, building numbers, cities, phone numbers and ID numbers.
 
-**Why:** Swedish documents often contain English: CVs, references, international contacts. Both Swedish models (spaCy and KB-BERT) are weak on English names and addresses. Rampart raised English recall from 68% to **91%** on the held-out set, at about 40 ms per paragraph.
+**Why:** Swedish documents often contain English: CVs, references, international contacts. Both Swedish models (spaCy and KB-BERT) are weak on English names and addresses. Rampart raised English recall from 71% to **91%** on the held-out set, at about 5–10 ms per English paragraph.
 
 **Caveats:** it lowercases text, strips accents and has no company label. So it only runs on paragraphs that look English, and its name hits must be capitalised in the original.
 
@@ -96,7 +96,7 @@ Docker and a single-file binary are described under [Getting started](#getting-s
 
 ## How it differs from pseudo-maker
 
-[pseudo-maker](https://github.com/121Development/pseudo-maker) uses spaCy's Swedish model plus rules. This ML variant puts KB-BERT and Rampart in front and keeps spaCy only as an optional fallback. On a held-out test set, the share of names, companies and places fully replaced goes from 83% to 95.5% (Swedish 90% → 100%, English 74% → 91%). The cost is slower detection, about 70 ms per paragraph on CPU. Details are under [Evaluation](#detection-models-first-rules-as-fallback).
+[pseudo-maker](https://github.com/121Development/pseudo-maker) uses spaCy's Swedish model plus rules. This ML variant puts KB-BERT and Rampart in front and keeps spaCy only as an optional fallback. On a held-out test set, the share of names, companies and places fully replaced goes from 84% to 95.5% (Swedish 90% → 100%, English 76% → 91%). The cost is slower detection: a two-page CV (330 lines) takes about 4 seconds on CPU, against about 1.5 seconds with spaCy alone. Details are under [Evaluation](#detection-models-first-rules-as-fallback).
 
 ## Workflow
 
@@ -157,9 +157,9 @@ Both models run on CPU with `onnxruntime`. There's no PyTorch at runtime and no 
 
 | Setup | Held-out set: sv | en | mix | all | precision | ms / paragraph |
 |---|---|---|---|---|---|---|
-| spaCy + rules (original pseudo-maker) | 90.0% | 73.5% | 85.7% | 83.0% | 98.8% | 6 |
-| KB-BERT + rules | **100%** | 67.6% | 85.7% | 85.2% | 98.7% | 17 |
-| **KB-BERT + Rampart + rules (default)** | **100%** | **91.2%** | **92.9%** | **95.5%** | 98.8% | 72 |
+| spaCy + rules (original pseudo-maker) | 90.0% | 76.5% | 85.7% | 84.1% | 98.8% | 7 |
+| KB-BERT + rules | **100%** | 70.6% | 85.7% | 86.4% | 98.7% | 15 |
+| **KB-BERT + Rampart + rules (default)** | **100%** | **91.2%** | **92.9%** | **95.5%** | 98.8% | 24 |
 
 `tests/data/ner_heldout.jsonl` (40 passages, 88 entities) was written after the rules were tuned and never used for tuning. On the tuning set (`ner_gold.jsonl`, 87 passages) the default setup reaches 98.9%. Remaining misses are mostly English company names that none of the models know, e.g. "Pinewood Analytics".
 
@@ -386,7 +386,7 @@ Round-trip tests verify that `clean → restore` produces byte-identical output 
 
 - English company names that aren't in the built-in list and have no legal suffix (`Ltd`, `Inc`, `AB`, …) can be missed. Rampart has no company label. Check the preview table.
 - Rampart lowercases text and strips accents, and covers Latin-script languages only. Swedish text is handled by KB-BERT.
-- Detection is ~70 ms per paragraph on CPU with both models (vs ~6 ms with spaCy only). A 20-page document takes roughly 10–30 s.
+- Detection takes about 15–25 ms per paragraph on CPU with both models (vs ~7 ms with spaCy only). A two-page CV takes about 4 s, a 20-page document roughly 15–30 s. Set `PSEUDO_MAKER_THREADS` to limit CPU threads on a shared server.
 - Documents with complex .docx formatting (nested tables, text boxes, images with embedded text) may lose some formatting when a single sensitive value spans multiple runs. Plain paragraphs and simple tables are preserved reliably.
 - Fakes are always Swedish-locale (Faker `sv_SE`), also for English text.
 

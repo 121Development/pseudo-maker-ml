@@ -116,12 +116,16 @@ def test_pipeline_runs_rampart_only_on_english(monkeypatch):
 
     p = DetectionPipeline(ner="kb", english_ner="auto")
     calls: list[str] = []
-    real = p.english_ner.find
-    monkeypatch.setattr(p.english_ner, "find", lambda t, *a: calls.append(t) or real(t, *a))
+    real = p.english_ner.find_many
+    monkeypatch.setattr(p.english_ner, "find_many", lambda ts, *a: calls.extend(ts) or real(ts, *a))
     p.detect("Anna arbetar på Volvo och bor i Malmö.")
     assert calls == []
     p.detect("Please call John Miller at the office.")
     assert calls == ["Please call John Miller at the office."]
+    # Batched: only the English paragraphs of a mixed document reach Rampart.
+    calls.clear()
+    p.detect_many(["Anna bor i Malmö och arbetar på Volvo.", "Please call John Miller.", ""])
+    assert calls == ["Please call John Miller."]
 
 
 @needs_kb
@@ -174,3 +178,25 @@ def test_swedish_headings_are_not_names():
     for heading in ("2. Lön", "Lön", "3. Övrigt", "Förmåner"):
         assert p.detect(heading) == [], heading
         assert list(RampartRecognizer().find(heading)) == [], heading
+
+
+@pytest.mark.parametrize("model", [models.KB_NER, models.RAMPART])
+def test_batched_tagging_matches_one_by_one(model):
+    """tag_many() must give exactly the same labels as tagging each text alone,
+    so a paragraph's result never depends on the rest of the document."""
+    from pseudo_maker.detect.models.onnx_tagger import load_tagger
+
+    if not (models.runtime_available() and models.available(model)):
+        pytest.skip(f"{model} not installed")
+    tagger = load_tagger(str(models.model_dir(model)))
+    texts = [
+        "Anna-Karin Lindqvist arbetar på Nordström Bygg AB i Malmö.",
+        "",
+        "Per Åkessons kontor ligger på Drottninggatan 5 i Stockholm.",
+        "Hej Sofia,",
+        "Mötet med Volvo Personvagnar hölls i Västerås. " * 60,  # longer than one window
+    ]
+    batched = tagger.tag_many(texts)
+    for text, words in zip(texts, batched):
+        single = tagger.tag(text) if text else []
+        assert [(w.start, w.end, w.label) for w in words] == [(w.start, w.end, w.label) for w in single]

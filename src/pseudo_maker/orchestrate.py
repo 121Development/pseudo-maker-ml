@@ -257,9 +257,7 @@ def preview_docx(
     mapper = Mapper(seed=seed)
     doc, handles = docx_io.load(input_path)
 
-    detected = [
-        pipeline.detect_with_candidates(h.full_text) if h.full_text.strip() else ([], []) for h in handles
-    ]
+    detected = pipeline.detect_many([h.full_text for h in handles])
     spans_per_handle = propagate_person_names([h.full_text for h in handles], [d[0] for d in detected])
     cands = [filter_candidates(sp, d[1]) for sp, d in zip(spans_per_handle, detected)]
     flat = [s for spans in spans_per_handle for s in spans]
@@ -305,7 +303,7 @@ def preview_text(
     # and the models then see one paragraph / table row / list item at a time
     # instead of a whole mixed Swedish-English document.
     lines = [(m.start(), m.group()) for m in re.finditer(r"[^\n]+", text)]
-    detected = [pipeline.detect_with_candidates(line) if line.strip() else ([], []) for _, line in lines]
+    detected = pipeline.detect_many([line for _, line in lines])
     per_line = propagate_person_names([line for _, line in lines], [d[0] for d in detected])
     spans: list[Span] = []
     cands: list[Candidate] = []
