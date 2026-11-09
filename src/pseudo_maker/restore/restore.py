@@ -116,11 +116,16 @@ def restore(
     spans: list[tuple[int, int, str, str]] = []  # (start, end, replacement, entry_id)
 
     matched_entry_ids: set[str] = set()
+    ranked: list[tuple[int, tuple[int, int, str, str]]] = []
     for entry in entries:
         local_count = 0
         for search, replacement in _candidates_for(entry):
+            # Rank 0 = an entity's full fake, 1 = a short form/alias. On an
+            # exact tie the full fake wins (a company called "Berg" beats the
+            # surname-only alias "Berg" of some person).
+            rank = 0 if search == entry["fake"] else 1
             for start, end in _find_matches(text, search):
-                spans.append((start, end, replacement, entry["id"]))
+                ranked.append((rank, (start, end, replacement, entry["id"])))
                 local_count += 1
         if local_count > 0:
             matched_entry_ids.add(entry["id"])
@@ -132,6 +137,7 @@ def restore(
                 "count": local_count,
             })
 
+    spans = [sp for _, sp in sorted(ranked, key=lambda r: r[0])]  # stable: ties keep rank order
     out = _apply_spans(text, spans)
 
     # Fuzzy fallback for unmatched entries

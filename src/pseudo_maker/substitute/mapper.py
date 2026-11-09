@@ -53,6 +53,10 @@ class Mapper:
         self.rng = random.Random(seed)
         self._by_key: dict[tuple[str, str], MappingEntry] = {}
         self._used_fakes: set[str] = set()
+        # Word parts of every fake in use, so a new fake never reuses one:
+        # "Skanska" → "Söderström" while a person is "Ann-Marie Söderström"
+        # would make "Söderström" ambiguous when restoring.
+        self._used_fake_parts: set[str] = set()
         # Real values (and name parts) in the document; fakes must never equal
         # one, or restore can't tell a fake from a real value.
         self._reserved: set[str] = set()
@@ -68,6 +72,17 @@ class Mapper:
         "och", "and", "&", "i", "på", "of",
     }
 
+    def _name_parts(self, value: str) -> list[str]:
+        """Meaningful word parts of a value (no legal suffixes, particles or short bits)."""
+        return [
+            p for p in re.split(r"[\s\-]+", value.lower())
+            if len(p) >= 3 and p.isalpha() and p not in self._NOT_RESERVED and p not in sv.NAME_PARTICLES
+        ]
+
+    def _register_fake(self, fake: str) -> None:
+        self._used_fakes.add(fake)
+        self._used_fake_parts.update(self._name_parts(fake))
+
     def reserve(self, originals) -> None:
         """Register every real value of the document before mapping starts.
 
@@ -82,6 +97,8 @@ class Mapper:
 
     def _collides(self, candidate: str, original: str, entity_type: str = "") -> bool:
         if candidate == original or candidate in self._used_fakes:
+            return True
+        if any(p in self._used_fake_parts for p in self._name_parts(candidate)):
             return True
         c = candidate.lower()
         if c in self._reserved:
@@ -107,11 +124,11 @@ class Mapper:
             else:
                 bad = candidate in self._used_fakes or candidate == original
             if not bad:
-                self._used_fakes.add(candidate)
+                self._register_fake(candidate)
                 return candidate
         # Last-resort suffix to guarantee uniqueness
         candidate = f"{candidate}_{self.rng.randint(1000, 9999)}"
-        self._used_fakes.add(candidate)
+        self._register_fake(candidate)
         return candidate
 
     def _find_existing(self, entity_type: str, text: str) -> MappingEntry | None:
@@ -240,7 +257,7 @@ class Mapper:
                 p in self._reserved for p in re.split(r"[\s\-]+", " ".join(head).lower()) if p
             ):
                 break
-        self._used_fakes.add(candidate)
+        self._register_fake(candidate)
         entry = MappingEntry(id=self._new_id(), type="PERSON", original=original, fake=candidate, occurrences=1)
         self._by_key[key] = entry
         return entry
@@ -301,7 +318,7 @@ class Mapper:
             if entry.id == entity_id:
                 self._used_fakes.discard(entry.fake)
                 entry.fake = new_fake
-                self._used_fakes.add(new_fake)
+                self._register_fake(new_fake)
                 if entry.aliases:
                     entry.fake_aliases = {
                         alias: self.fake_for_alias(entry, alias)
