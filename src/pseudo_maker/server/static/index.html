@@ -48,23 +48,38 @@
         <!-- Table view -->
         <div id="view-table" class="view active">
           <p class="hint">Uncheck anything you want kept as-is. Unchecked entities will <strong>not</strong> be replaced.</p>
+          <div class="filter-bar">
+            <input type="search" id="filter-text" placeholder="Search original or replacement…" spellcheck="false" autocomplete="off" aria-label="Search entities" />
+            <select id="filter-type" class="type-select" aria-label="Filter by type"></select>
+            <select id="filter-status" class="type-select" aria-label="Filter by status">
+              <option value="">All statuses</option>
+              <option value="replaced">Replaced</option>
+              <option value="kept">Kept as-is</option>
+              <option value="uncertain">Uncertain</option>
+              <option value="manual">Added by you</option>
+              <option value="edited">Edited</option>
+            </select>
+            <button class="link-btn" id="filter-clear" hidden>Clear filters</button>
+          </div>
           <div class="bulk-controls">
             <button class="link-btn" id="select-all">Select all</button>
             <button class="link-btn" id="select-none">Deselect all</button>
+            <span id="filter-summary" class="muted"></span>
           </div>
           <div class="table-wrap">
             <table id="entity-table">
               <thead>
                 <tr>
-                  <th class="col-check">Replace</th>
-                  <th>Type</th>
-                  <th>Original</th>
-                  <th>Will become <span class="muted">(click to edit)</span></th>
-                  <th class="col-count">Count</th>
+                  <th class="col-check sortable" data-sort="replace" tabindex="0">Replace</th>
+                  <th class="sortable" data-sort="type" tabindex="0">Type</th>
+                  <th class="sortable" data-sort="original" tabindex="0">Original</th>
+                  <th class="sortable" data-sort="fake" tabindex="0">Will become <span class="muted">(click to edit)</span></th>
+                  <th class="col-count sortable" data-sort="count" tabindex="0">Count</th>
                 </tr>
               </thead>
               <tbody id="entity-body"></tbody>
             </table>
+            <p id="table-empty" class="table-empty muted" hidden>No entities match the filters.</p>
           </div>
         </div>
 

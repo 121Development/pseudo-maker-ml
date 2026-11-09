@@ -274,7 +274,8 @@ Start the server (any of the three options above) and open `http://127.0.0.1:876
 
 **Clean tab** — drag in a `.docx` / `.txt` / `.md` file. The tool detects entities and shows a preview with two views (switch at the top right):
 
-- **Table**: one row per entity.
+- **Table**: one row per entity, in document order.
+  - Click a column header to sort (again to reverse, a third time for document order). Filter with the search box, by type, or by status (replaced, kept, uncertain, added by you, edited). **Select/Deselect** then apply to the rows shown.
   - Untick **Replace** to leave the original in place.
   - Click the **Will become** cell to edit the fake. Client-side validation warns on empty, duplicate or invalid-checksum values but still accepts yours.
   - Rows flagged *uncertain* had low model confidence. Rows flagged *added* are ones you added.

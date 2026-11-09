@@ -126,6 +126,8 @@ const cleanState = {
   customFakes: new Map(), // entity_id → user-chosen fake (string)
   currentFakes: new Map(), // entity_id → current fake (auto or custom), used for duplicate detection
   view: 'table',
+  sort: { key: null, dir: 1 },          // key: replace | type | original | fake | count; null = document order
+  filter: { text: '', type: '', status: '' },
 };
 
 function wireDropzone(zone, input, onFile) {
@@ -226,11 +228,96 @@ $$('.view-btn').forEach((btn) => {
 
 // ---- Table view
 
+/** Position of each entity's first occurrence in the document, for the default order. */
+function documentOrder() {
+  const order = new Map();
+  let n = 0;
+  for (const para of cleanState.document) {
+    for (const span of [...para.spans].sort((a, b) => a.start - b.start)) {
+      if (!order.has(span.entity_id)) order.set(span.entity_id, n++);
+    }
+  }
+  return order;
+}
+
+function entityStatus(e) {
+  return {
+    replaced: !cleanState.excluded.has(e.id),
+    kept: cleanState.excluded.has(e.id),
+    uncertain: !!e.uncertain,
+    manual: (e.sources || []).includes('manual'),
+    edited: cleanState.customFakes.has(e.id),
+  };
+}
+
+function matchesFilter(e) {
+  const { text, type, status } = cleanState.filter;
+  if (type && e.type !== type) return false;
+  if (status && !entityStatus(e)[status]) return false;
+  if (text) {
+    const q = text.toLowerCase();
+    const hay = [e.original, e.fake, e.type, ...(e.aliases || [])].join(' ').toLowerCase();
+    if (!hay.includes(q)) return false;
+  }
+  return true;
+}
+
+const collator = new Intl.Collator('sv', { sensitivity: 'base', numeric: true });
+
+function sortedEntities(list) {
+  const order = documentOrder();
+  const byDoc = (a, b) => (order.get(a.id) ?? 1e9) - (order.get(b.id) ?? 1e9);
+  const { key, dir } = cleanState.sort;
+  if (!key) return [...list].sort(byDoc);
+  const value = {
+    replace: (e) => (cleanState.excluded.has(e.id) ? 1 : 0),
+    type: (e) => e.type,
+    original: (e) => e.original,
+    fake: (e) => e.fake,
+    count: (e) => e.occurrences,
+  }[key];
+  return [...list].sort((a, b) => {
+    const va = value(a), vb = value(b);
+    const c = typeof va === 'number' ? va - vb : collator.compare(va, vb);
+    return c * dir || byDoc(a, b);
+  });
+}
+
+/** Rebuild the type filter options from the entities present (with counts). */
+function renderTypeFilter() {
+  const sel = $('#filter-type');
+  const counts = new Map();
+  for (const e of cleanState.entities) counts.set(e.type, (counts.get(e.type) || 0) + 1);
+  const current = cleanState.filter.type;
+  if (current && !counts.has(current)) cleanState.filter.type = '';
+  sel.innerHTML = `<option value="">All types (${cleanState.entities.length})</option>` +
+    [...counts.keys()].sort().map((t) =>
+      `<option value="${escapeHtml(t)}"${t === cleanState.filter.type ? ' selected' : ''}>${escapeHtml(t)} (${counts.get(t)})</option>`).join('');
+}
+
+function visibleEntities() {
+  return sortedEntities(cleanState.entities.filter(matchesFilter));
+}
+
 function renderEntities() {
   const body = $('#entity-body');
   body.innerHTML = '';
   $('#entity-count').textContent = `(${cleanState.entities.length})`;
-  for (const e of cleanState.entities) {
+  renderTypeFilter();
+  const rows = visibleEntities();
+  const filtered = !!(cleanState.filter.text || cleanState.filter.type || cleanState.filter.status);
+  $('#filter-summary').textContent = filtered ? `Showing ${rows.length} of ${cleanState.entities.length}` : '';
+  $('#filter-clear').hidden = !filtered;
+  $('#select-all').textContent = filtered ? 'Select shown' : 'Select all';
+  $('#select-none').textContent = filtered ? 'Deselect shown' : 'Deselect all';
+  $('#table-empty').hidden = rows.length > 0;
+  $$('#entity-table th.sortable').forEach((th) => {
+    const active = th.dataset.sort === cleanState.sort.key;
+    th.classList.toggle('sorted', active);
+    th.dataset.dir = active ? (cleanState.sort.dir > 0 ? 'asc' : 'desc') : '';
+    th.setAttribute('aria-sort', active ? (cleanState.sort.dir > 0 ? 'ascending' : 'descending') : 'none');
+  });
+  for (const e of rows) {
     const tr = document.createElement('tr');
     tr.dataset.id = e.id;
     tr.dataset.type = e.type;
@@ -266,6 +353,37 @@ function renderEntities() {
     });
   });
 }
+
+// Sorting: click a header → ascending, again → descending, third time → document order.
+$$('#entity-table th.sortable').forEach((th) => {
+  const toggle = () => {
+    const key = th.dataset.sort;
+    const s = cleanState.sort;
+    if (s.key !== key) { s.key = key; s.dir = 1; }
+    else if (s.dir === 1) s.dir = -1;
+    else { s.key = null; s.dir = 1; }
+    renderEntities();
+  };
+  th.addEventListener('click', (ev) => { if (!ev.target.closest('input')) toggle(); });
+  th.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(); }
+  });
+});
+
+// Filtering
+let filterTimer = null;
+$('#filter-text').addEventListener('input', (ev) => {
+  clearTimeout(filterTimer);
+  filterTimer = setTimeout(() => { cleanState.filter.text = ev.target.value.trim(); renderEntities(); }, 120);
+});
+$('#filter-type').addEventListener('change', (ev) => { cleanState.filter.type = ev.target.value; renderEntities(); });
+$('#filter-status').addEventListener('change', (ev) => { cleanState.filter.status = ev.target.value; renderEntities(); });
+$('#filter-clear').addEventListener('click', () => {
+  cleanState.filter = { text: '', type: '', status: '' };
+  $('#filter-text').value = '';
+  $('#filter-status').value = '';
+  renderEntities();
+});
 
 /** Soft checks for a new fake; returns a warning message or ''. */
 function fakeWarning(id, type, newVal) {
@@ -342,13 +460,14 @@ function showWarn(el, message) {
   el.hidden = false;
 }
 
+// Select / deselect act on the rows currently shown (all rows when unfiltered).
 $('#select-all').addEventListener('click', () => {
-  cleanState.excluded.clear();
+  for (const e of cleanState.entities.filter(matchesFilter)) cleanState.excluded.delete(e.id);
   renderEntities();
   renderDocument();
 });
 $('#select-none').addEventListener('click', () => {
-  cleanState.excluded = new Set(cleanState.entities.map((e) => e.id));
+  for (const e of cleanState.entities.filter(matchesFilter)) cleanState.excluded.add(e.id);
   renderEntities();
   renderDocument();
 });
@@ -622,6 +741,10 @@ function resetCleanFlow() {
   cleanState.excluded = new Set();
   cleanState.customFakes = new Map();
   cleanState.currentFakes = new Map();
+  cleanState.sort = { key: null, dir: 1 };
+  cleanState.filter = { text: '', type: '', status: '' };
+  $('#filter-text').value = '';
+  $('#filter-status').value = '';
   $('#file-clean').value = '';
   $('#add-term-input').value = '';
   $('#add-term-msg').hidden = true;
