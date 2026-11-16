@@ -155,13 +155,17 @@ Both models run on CPU with `onnxruntime`. There's no PyTorch at runtime and no 
 
 **Evaluation** (`python scripts/eval_ner.py`; *leak-free recall* = share of names/companies/places with every character replaced):
 
-| Setup | Held-out set: sv | en | mix | all | precision | ms / paragraph |
-|---|---|---|---|---|---|---|
-| spaCy + rules (original pseudo-maker) | 90.0% | 76.5% | 85.7% | 84.1% | 98.8% | 7 |
-| KB-BERT + rules | **100%** | 70.6% | 85.7% | 86.4% | 98.7% | 15 |
-| **KB-BERT + Rampart + rules (default)** | **100%** | **91.2%** | **92.9%** | **95.5%** | 98.8% | 24 |
+| Setup | Held-out set 1: all | Held-out set 2: sv | en | mix | all | precision | ms / paragraph |
+|---|---|---|---|---|---|---|---|
+| spaCy + rules (original pseudo-maker) | 84.1% | 92.9% | 83.6% | 92.9% | 87.4% | 97.9% | 3 |
+| KB-BERT + rules | 86.4% | 96.4% | 95.1% | **100%** | 96.1% | **99.0%** | 10 |
+| KB-BERT + Rampart + spaCy + rules | 95.5% | 96.4% | **96.7%** | **100%** | **97.1%** | 98.1% | 17 |
+| **KB-BERT + Rampart + rules (no spaCy)** | 93.2% | 96.4% | **96.7%** | **100%** | **97.1%** | **99.0%** | 12 |
 
-`tests/data/ner_heldout.jsonl` (40 passages, 88 entities) was written after the rules were tuned and never used for tuning. On the tuning set (`ner_gold.jsonl`, 87 passages) the default setup reaches 98.9%. Remaining misses are mostly English company names that none of the models know, e.g. "Pinewood Analytics".
+- **Held-out set 1** (`ner_heldout.jsonl`, 40 passages) was written after the first rules were tuned. Its numbers are from before the context rules for company names, which were designed on its misses. Since then all setups reach 98.9–100% on it.
+- **Held-out set 2** (`ner_heldout2.jsonl`, 50 passages) was committed before those rules were written and never used to tune them. Its numbers are current.
+- **The context rules** find company names from how they are written: "worked at Netlight", "Kenji Watanabe (Toyota)", "Booking.com", "Pinewood Analytics". The models' own vocabularies tell everyday words from names, so "worked at Christmas" is not a company.
+- **spaCy is no longer needed:** with the context rules it adds no recall and costs some precision. The tuning set (`ner_gold.jsonl`, 87 passages) scores 99.5–100% either way.
 
 Selecting models:
 
