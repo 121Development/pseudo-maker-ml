@@ -1,0 +1,50 @@
+{"lang": "en", "text": "After graduating, Priya Raman joined Deloitte as a junior auditor.", "entities": [["Priya Raman", "PERSON"], ["Deloitte", "COMPANY"]]}
+{"lang": "en", "text": "Tom Ashworth spent six years at Unilever before moving to Leeds.", "entities": [["Tom Ashworth", "PERSON"], ["Unilever", "COMPANY"], ["Leeds", "LOC"]]}
+{"lang": "en", "text": "Attendees: Sarah Okafor (Barclays), Liam Doyle (Accenture) and Mei Chen.", "entities": [["Sarah Okafor", "PERSON"], ["Barclays", "COMPANY"], ["Liam Doyle", "PERSON"], ["Accenture", "COMPANY"], ["Mei Chen", "PERSON"]]}
+{"lang": "en", "text": "The invoice was issued by Harbourview Logistics to our office in Bristol.", "entities": [["Harbourview Logistics", "COMPANY"], ["Bristol", "LOC"]]}
+{"lang": "en", "text": "Daniel Price works for Expedia.com in their Seattle branch.", "entities": [["Daniel Price", "PERSON"], ["Expedia.com", "COMPANY"], ["Seattle", "LOC"]]}
+{"lang": "en", "text": "She previously interned at Hewlett-Packard and later at Siemens.", "entities": [["Hewlett-Packard", "COMPANY"], ["Siemens", "COMPANY"]]}
+{"lang": "en", "text": "Contact Oliver Grant at Northbridge Consulting for the pricing sheet.", "entities": [["Oliver Grant", "PERSON"], ["Northbridge Consulting", "COMPANY"]]}
+{"lang": "en", "text": "We use Microsoft Excel and Slack for most of our planning.", "entities": []}
+{"lang": "en", "text": "The meeting is on Monday in March, unless Christmas plans interfere.", "entities": []}
+{"lang": "en", "text": "Experience: Product Manager, Spotify, London; Engineer, Klarna, Berlin.", "entities": [["Spotify", "COMPANY"], ["London", "LOC"], ["Klarna", "COMPANY"], ["Berlin", "LOC"]]}
+{"lang": "en", "text": "Grace Holloway lives at 22 Elm Grove, Cambridge, with her partner Ben.", "entities": [["Grace Holloway", "PERSON"], ["22 Elm Grove", "LOC"], ["Cambridge", "LOC"], ["Ben", "PERSON"]]}
+{"lang": "en", "text": "The contract between Redwood Capital Partners and Ilse Brandt was signed in Munich.", "entities": [["Redwood Capital Partners", "COMPANY"], ["Ilse Brandt", "PERSON"], ["Munich", "LOC"]]}
+{"lang": "en", "text": "He studied in France and Germany before working in Canada.", "entities": []}
+{"lang": "en", "text": "Our auditors from KPMG flagged two issues in the Q3 report.", "entities": [["KPMG", "COMPANY"]]}
+{"lang": "en", "text": "Laura Mendes was hired by Vodafone after an internship with Ericsson.", "entities": [["Laura Mendes", "PERSON"], ["Vodafone", "COMPANY"], ["Ericsson", "COMPANY"]]}
+{"lang": "en", "text": "Please send the signed form to Hannah Whitfield by Friday.", "entities": [["Hannah Whitfield", "PERSON"]]}
+{"lang": "en", "text": "Supplier: Bluestone Systems Ltd, 4 Mill Lane, Norwich.", "entities": [["Bluestone Systems Ltd", "COMPANY"], ["4 Mill Lane", "LOC"], ["Norwich", "LOC"]]}
+{"lang": "en", "text": "Marcus Lee left Tesla in 2021 and co-founded Brightleaf Labs.", "entities": [["Marcus Lee", "PERSON"], ["Tesla", "COMPANY"], ["Brightleaf Labs", "COMPANY"]]}
+{"lang": "en", "text": "The referee, Dr. Alan Pierce of Imperial College, confirmed the results.", "entities": [["Alan Pierce", "PERSON"], ["Imperial College", "COMPANY"]]}
+{"lang": "en", "text": "I wrote the summary in English and shared it on Teams with the team.", "entities": []}
+{"lang": "en", "text": "Funding came from Wellcome Trust and a grant handled by Nadia Rossi.", "entities": [["Wellcome Trust", "COMPANY"], ["Nadia Rossi", "PERSON"]]}
+{"lang": "en", "text": "Chris Morgan, a consultant at Capgemini, reviewed the migration plan.", "entities": [["Chris Morgan", "PERSON"], ["Capgemini", "COMPANY"]]}
+{"lang": "en", "text": "Quarterly sales grew in Europe and Asia despite the strong dollar.", "entities": []}
+{"lang": "en", "text": "Emma Novak's manager at Airbnb approved the remote-work request.", "entities": [["Emma Novak's", "PERSON"], ["Airbnb", "COMPANY"]]}
+{"lang": "en", "text": "Rachel Kim and her brother Joseph moved from Toronto to Dublin.", "entities": [["Rachel Kim", "PERSON"], ["Joseph", "PERSON"], ["Toronto", "LOC"], ["Dublin", "LOC"]]}
+{"lang": "sv", "text": "Elsa Bergström började på Volvo Cars i Torslanda förra året.", "entities": [["Elsa Bergström", "PERSON"], ["Volvo Cars", "COMPANY"], ["Torslanda", "LOC"]]}
+{"lang": "sv", "text": "Hyresavtalet för Lövängsgatan 3 tecknades med Fastighets AB Eken.", "entities": [["Lövängsgatan 3", "LOC"], ["Fastighets AB Eken", "COMPANY"]]}
+{"lang": "sv", "text": "Kalle Nyström arbetar som säljare hos Elgiganten i Borås.", "entities": [["Kalle Nyström", "PERSON"], ["Elgiganten", "COMPANY"], ["Borås", "LOC"]]}
+{"lang": "sv", "text": "Mötet hölls på måndagen och protokollet skrevs i Word.", "entities": []}
+{"lang": "sv", "text": "Saga Lindqvists mamma, Ingrid, bor kvar i Härnösand.", "entities": [["Saga Lindqvists", "PERSON"], ["Ingrid", "PERSON"], ["Härnösand", "LOC"]]}
+{"lang": "sv", "text": "Ärendet handläggs av Försäkringskassan och Johan Ek är kontaktperson.", "entities": [["Johan Ek", "PERSON"]]}
+{"lang": "sv", "text": "Ombud för kärandena är advokat Maria Sandell, Advokatfirman Lindahl.", "entities": [["Maria Sandell", "PERSON"], ["Advokatfirman Lindahl", "COMPANY"]]}
+{"lang": "sv", "text": "Björn och Annika Holm äger en sommarstuga utanför Trosa.", "entities": [["Björn", "PERSON"], ["Annika Holm", "PERSON"], ["Trosa", "LOC"]]}
+{"lang": "sv", "text": "Leverantören Nordisk Kyl & Värme AB har sitt säte i Umeå.", "entities": [["Nordisk Kyl & Värme AB", "COMPANY"], ["Umeå", "LOC"]]}
+{"lang": "sv", "text": "Hon flyttade från Norge till Sverige och jobbar nu på ICA.", "entities": [["ICA", "COMPANY"]]}
+{"lang": "sv", "text": "Pojken, Viktor Åman, går i årskurs fyra på Ekbackeskolan.", "entities": [["Viktor Åman", "PERSON"], ["Ekbackeskolan", "COMPANY"]]}
+{"lang": "sv", "text": "Fakturan skickades till Gustav Hedlund, Storgatan 8, Skellefteå.", "entities": [["Gustav Hedlund", "PERSON"], ["Storgatan 8", "LOC"], ["Skellefteå", "LOC"]]}
+{"lang": "sv", "text": "Under januari och februari sköttes kontakten via Teams.", "entities": []}
+{"lang": "sv", "text": "LINNÉA FORSBERG har sagt upp sin anställning hos Postnord.", "entities": [["LINNÉA FORSBERG", "PERSON"], ["Postnord", "COMPANY"]]}
+{"lang": "sv", "text": "Avtalet med Byggmästarna i Mälardalen AB avslutades i maj.", "entities": [["Byggmästarna i Mälardalen AB", "COMPANY"]]}
+{"lang": "mix", "text": "Johanna Berg (Spotify) presenterade resultaten för styrelsen.", "entities": [["Johanna Berg", "PERSON"], ["Spotify", "COMPANY"]]}
+{"lang": "mix", "text": "Erik Sandberg worked at Scania in Södertälje before joining Google.", "entities": [["Erik Sandberg", "PERSON"], ["Scania", "COMPANY"], ["Södertälje", "LOC"], ["Google", "COMPANY"]]}
+{"lang": "mix", "text": "Referens: Anders Wikström, Head of Sales at Atlas Copco, Nacka.", "entities": [["Anders Wikström", "PERSON"], ["Atlas Copco", "COMPANY"], ["Nacka", "LOC"]]}
+{"lang": "mix", "text": "Malin Ekdahl is moving to Oslo to work for Equinor.", "entities": [["Malin Ekdahl", "PERSON"], ["Oslo", "LOC"], ["Equinor", "COMPANY"]]}
+{"lang": "mix", "text": "Kontaktperson på Fjällräven: Oskar Lund, oskar is available on Tuesdays.", "entities": [["Fjällräven", "COMPANY"], ["Oskar Lund", "PERSON"]]}
+{"lang": "en", "text": "The tender was won by Westgate Engineering over two Swedish rivals.", "entities": [["Westgate Engineering", "COMPANY"]]}
+{"lang": "en", "text": "Sophie Turner-Hale has been with Lloyds for nine years.", "entities": [["Sophie Turner-Hale", "PERSON"], ["Lloyds", "COMPANY"]]}
+{"lang": "en", "text": "Lunch at Nando's was paid for by Kevin Walsh.", "entities": [["Nando's", "COMPANY"], ["Kevin Walsh", "PERSON"]]}
+{"lang": "en", "text": "References available on request from Fiona Clarke, Zendesk.", "entities": [["Fiona Clarke", "PERSON"], ["Zendesk", "COMPANY"]]}
+{"lang": "en", "text": "During the summer of 2019 he volunteered with the Red Cross in Kenya.", "entities": [["Red Cross", "COMPANY"]]}
