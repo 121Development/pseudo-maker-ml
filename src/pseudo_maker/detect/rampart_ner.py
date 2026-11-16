@@ -44,7 +44,7 @@ _TYPE_MAP = {
     # STATE / ZIP_CODE: dropped (Swedish postal codes are handled by regex).
 }
 
-_JOIN_GAP = set(" \t-'.,")
+_JOIN_GAP = set(" \t\u00a0\u202f-'.,")
 
 
 def decode_bio(text: str, words: list[WordPrediction]) -> list[tuple[int, int, str, float]]:

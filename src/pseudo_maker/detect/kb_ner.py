@@ -31,7 +31,7 @@ _LEGAL_OR_PUBLIC = re.compile(
 
 # What may sit between two words of one entity: "Anna-Karin", "H&M", "S:t", one
 # space. Wider gaps (signature lines, table-like layouts) separate entities.
-_BRIDGE = re.compile(r"(?: ?[\-&:'] ?| )?")
+_BRIDGE = re.compile(r"(?:[ \u00a0\u202f]?[\-&:'][ \u00a0\u202f]?|[ \u00a0\u202f])?")
 
 
 def _map_label(label: str, text: str) -> str | None:

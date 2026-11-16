@@ -200,3 +200,13 @@ def test_batched_tagging_matches_one_by_one(model):
     for text, words in zip(texts, batched):
         single = tagger.tag(text) if text else []
         assert [(w.start, w.end, w.label) for w in words] == [(w.start, w.end, w.label) for w in single]
+
+
+@needs_kb
+def test_emoji_and_no_break_space_around_names():
+    from pseudo_maker.detect.pipeline import DetectionPipeline
+
+    p = DetectionPipeline(ner="kb", english_ner="off")
+    values = [s.value for s in p.detect("Mötet med 👩‍💼 Anna Ek och 🎉 Per Åkesson hölls i Västerås.")]
+    assert "Anna Ek" in values and "Per Åkesson" in values
+    assert [s.value for s in p.detect("Kontakt: Lena Holm, tfn") if s.type == "PERSON"] == ["Lena Holm"]

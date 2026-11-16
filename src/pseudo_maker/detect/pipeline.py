@@ -24,6 +24,7 @@ from .recognizers.company_street_se import (
     StreetSeRecognizer,
 )
 from .recognizers.case_number_se import CaseNumberSeRecognizer
+from .recognizers.company_context import ContextCompanyRecognizer, paren_company
 from .recognizers.credit_card import CreditCardRecognizer
 from .recognizers.date_age import AgeRecognizer, DateRecognizer
 from .recognizers.email import EmailRecognizer
@@ -63,6 +64,7 @@ def _default_regex_recognizers():
         StreetSeRecognizer(),
         CompanySeRecognizer(),
         KnownCompanySeRecognizer(),
+        ContextCompanyRecognizer(),
         KnownPlaceRecognizer(),
     ]
 
@@ -189,6 +191,7 @@ class DetectionPipeline:
                 out.append(([], []))
                 continue
             found = _resolve_overlaps([_extend_street_number(texts[i], s) for s in spans[i]])
+            found = _add_paren_companies(texts[i], found)
             out.append((found, rejected[i] + _known_name_candidates(texts[i])))
         return out
 
@@ -286,6 +289,18 @@ def propagate_person_names(texts: Sequence[str], spans_per_text: list[list[Span]
         new.sort(key=lambda s: s.start)
         out.append(new)
     return out
+
+
+def _add_paren_companies(text: str, spans: list[Span]) -> list[Span]:
+    """"Kenji Watanabe (Toyota)": a name in parentheses after a person is their employer."""
+    extra = []
+    for s in spans:
+        if s.type != "PERSON":
+            continue
+        c = paren_company(text, s.end)
+        if c and not any(c.start < o.end and o.start < c.end for o in spans):
+            extra.append(c)
+    return sorted(spans + extra, key=lambda s: s.start) if extra else spans
 
 
 def _extend_street_number(text: str, span: Span) -> Span:
