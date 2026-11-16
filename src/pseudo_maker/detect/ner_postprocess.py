@@ -131,8 +131,6 @@ def _titlecase_caps(text: str) -> str:
 
 
 # Punctuation and Markdown syntax a model may include at a span's edges.
-_EDGE_PUNCT_START = "\"'([{,;:–—-•*#|>_`~"
-_EDGE_PUNCT_END = "\"')]},;:.–—-•*#|>_`~"
 
 _LINE_START = re.compile(r"(?:^|\n|\|)[ \t]*(?:[#>*\-+•]+[ \t]*|\d+[.)][ \t]*)*$")
 
@@ -191,9 +189,11 @@ def postprocess(
     `text` is the full original text; `start`/`end` index into it.
     """
     # Trim whitespace and punctuation the model may include at the edges.
-    while start < end and (text[start].isspace() or text[start] in _EDGE_PUNCT_START):
+    # Names start and end with a letter or digit; anything else at the edges
+    # (quotes, brackets, markup, emoji the model glued on) is trimmed.
+    while start < end and not text[start].isalnum():
         start += 1
-    while end > start and (text[end - 1].isspace() or text[end - 1] in _EDGE_PUNCT_END):
+    while end > start and not text[end - 1].isalnum():
         end -= 1
     span_text = text[start:end]
     stripped, offset = _strip_leading_noise(span_text)
